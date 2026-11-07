@@ -108,7 +108,7 @@ Window::Window(bool demo, bool demoWarning, int initialTab)
     : m_demo(demo), m_demoWarning(demoWarning), m_settings(demo ? "DriveWatchPreview" : "DriveWatch", "DriveWatch") {
     setWindowTitle(demo ? "DriveWatch — Preview" : "DriveWatch");
     setWindowIcon(statusIcon(false));
-    resize(1040, 710);
+    resize(1040, 820);
     m_statePath = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/state.json";
     if (!demo) {
         QFile f(m_statePath);
@@ -144,6 +144,7 @@ Window::Window(bool demo, bool demoWarning, int initialTab)
     auto *overview = new QWidget;
     auto *ov = new QVBoxLayout(overview);
     auto *splitter = new QSplitter(Qt::Vertical);
+    splitter->setChildrenCollapsible(false);
     m_drives = new QTableWidget(0, 6);
     m_drives->setObjectName("driveTable");
     m_drives->setHorizontalHeaderLabels({"Drive", "Device", "Temperature", "Endurance used", "Spare", "Status"});
@@ -157,8 +158,11 @@ Window::Window(bool demo, bool demoWarning, int initialTab)
     splitter->addWidget(m_drives);
     m_details = new QTextEdit;
     m_details->setReadOnly(true);
+    m_details->setMinimumHeight(m_details->fontMetrics().lineSpacing() * 12 + 16);
     splitter->addWidget(m_details);
-    splitter->setSizes({300, 170});
+    splitter->setSizes({230, 280});
+    splitter->setStretchFactor(0, 1);
+    splitter->setStretchFactor(1, 1);
     ov->addWidget(splitter);
     m_ranges = new QLabel;
     m_ranges->setWordWrap(true); ov->addWidget(m_ranges);
@@ -383,7 +387,7 @@ void Window::render() {
         const auto active = r.value("active").toObject();
         bool critical = false;
         for (const auto c : active) critical |= c.toObject().value("level").toString() == "critical";
-        QString status = !r.value("connected").toBool() ? "Disconnected" : (critical ? "Critical" : (!active.isEmpty() ? "Warning" : "Stable"));
+        QString status = !r.value("connected").toBool() ? "Disconnected" : (critical ? "Critical" : (!active.isEmpty() ? "Warning" : (d.contains("error") ? "Read pending" : "Stable")));
         bool unread = false;
         for (const auto e : m_monitor.events())
             if (e.toObject().value("drive_id") == r.value("id") && !e.toObject().value("acknowledged").toBool()) unread = true;
@@ -476,7 +480,7 @@ void Window::renderMini() {
         const bool disconnected = !r.value("connected").toBool();
         row.icon->setPixmap(statusIcon(active || unread).pixmap(24, 24));
         row.model->setText(d.value("model").toString());
-        QString state = disconnected ? "Disconnected" : (critical ? "Critical warning" : (active ? "Active warning" : (unread ? "New health change" : "Stable")));
+        QString state = disconnected ? "Disconnected" : (critical ? "Critical warning" : (active ? "Active warning" : (unread ? "New health change" : (d.contains("error") ? "Read pending" : "Stable"))));
         row.detail->setText(d.value("device").toString() + " · " + state);
         colorLabel(row.detail, critical ? 1.0 : ((active || unread) ? 0.5 : 0.0));
         row.temperature->setText(d.contains("error") || disconnected || !d.contains("temperature") ? "—" : temperatureText(d.value("temperature").toDouble()));
@@ -521,7 +525,10 @@ void Window::details() {
                           "Temperature: " + (d.contains("temperature") ? temperatureText(d.value("temperature").toDouble()) : "Unavailable")};
         const auto active = r.value("active").toObject();
         for (auto it = active.begin(); it != active.end(); ++it) lines << "WARNING: " + it.value().toObject().value("message").toString();
-        if (active.isEmpty()) lines << "No active warning conditions. Historical counts below are retained as the comparison baseline.";
+        if (d.contains("error") && !active.contains("read"))
+            lines << "SMART read unavailable; waiting for 30 minutes of failed checks before alerting. Last successful values are retained below."
+                  << d.value("error").toString();
+        if (active.isEmpty() && !d.contains("error")) lines << "No active warning conditions. Historical counts below are retained as the comparison baseline.";
         auto counters = d.value("counters").toObject();
         for (auto it = counters.begin(); it != counters.end(); ++it)
             lines << QString(it.key()).replace('_', ' ') + ": " + it.value().toString();

@@ -25,3 +25,29 @@ jobs:
         with:
           name: drivewatch-deb
           path: build/*.deb
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release v')
+    needs: deb
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: drivewatch-deb
+          path: release
+      - name: Publish tested preview package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^project(DriveWatch VERSION \([^ ]*\) .*/\1/p' CMakeLists.txt)
+          test -n "$version"
+          package="drivewatch_${version}_amd64.deb"
+          test -f "release/$package"
+          (cd release && sha256sum "$package" > SHA256SUMS)
+          gh release create "v$version" "release/$package" release/SHA256SUMS \
+            --target "$GITHUB_SHA" --title "v$version — Preview update" \
+            --notes-file "docs/releases/v$version.md" --prerelease

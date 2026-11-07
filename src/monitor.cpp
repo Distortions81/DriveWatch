@@ -143,11 +143,25 @@ QStringList Monitor::update(const QJsonObject &snapshot, qint64 now, const Polic
         const QString label = name(d);
         if (d.contains("error")) {
             incomplete = true;
-            conditions["read"] = condition(label + ": " + d.value("error").toString());
+            // Use collection times so rereading one snapshot cannot confirm a failure.
+            const qint64 lastFailure = record.value("read_failure_last").toInteger();
+            qint64 since = record.value("read_failure_since").toInteger(collected);
+            if (!record.contains("read_failure_since") || collected < lastFailure
+                || collected - lastFailure > policy.staleSeconds)
+                since = collected;
+            record["read_failure_since"] = since;
+            record["read_failure_last"] = collected;
+            if (collected - since >= policy.readFailureSeconds)
+                conditions["read"] = condition(label + ": SMART monitoring unavailable for at least 30 minutes; "
+                                               "drive health is unknown. " + d.value("error").toString());
             // Keep prior faults visible while the device cannot be queried.
             const auto old = record.value("active").toObject();
             for (auto it = old.begin(); it != old.end(); ++it)
                 if (it.key() != "missing" && it.key() != "read") conditions[it.key()] = it.value();
+        }
+        else {
+            record.remove("read_failure_since");
+            record.remove("read_failure_last");
         }
         if (d.value("passed").isBool() && !d.value("passed").toBool())
             conditions["failed"] = condition(label + ": SMART reports a failing drive.", "critical");
@@ -237,6 +251,8 @@ QStringList Monitor::update(const QJsonObject &snapshot, qint64 now, const Polic
         if (seen.contains(it.key())) continue;
         auto record = it.value().toObject();
         record["connected"] = false;
+        record.remove("read_failure_since");
+        record.remove("read_failure_last");
         active(record, {{"missing", condition(name(record.value("sample").toObject()) + ": drive is no longer detected.")}},
                now, policy, notices);
         it.value() = record;

@@ -10,6 +10,7 @@ struct Policy {
     int hysteresis = 5;
     int staleSeconds = 300;
     int cooldownSeconds = 1800;
+    int readFailureSeconds = 1800;
 };
 
 QString displayTemperature(double celsius);

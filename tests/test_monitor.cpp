@@ -131,8 +131,46 @@ private slots:
         m.update(frame(failed, now + 60), now + 60);
         QCOMPARE(m.drives().size(), 1);
         auto active = m.drives()[0].toObject()["active"].toObject();
-        QVERIFY(active.contains("nvme")); QVERIFY(active.contains("read"));
+        QVERIFY(active.contains("nvme")); QVERIFY(!active.contains("read"));
         QCOMPARE(m.update(frame(drive("1136"), now + 120), now + 120).size(), 1);
+    }
+    void readFailuresRequireThirtyMinutesAcrossRestart() {
+        Monitor m; m.update(frame(), now);
+        auto failed = drive(); failed["error"] = "timeout";
+        for (int elapsed = 60; elapsed <= 1800; elapsed += 60) {
+            QVERIFY(m.update(frame(failed, now + elapsed), now + elapsed).isEmpty());
+            QVERIFY(!m.warning());
+        }
+        Monitor resumed(QJsonDocument::fromJson(QJsonDocument(m.state()).toJson()).object());
+        QCOMPARE(resumed.update(frame(failed, now + 1860), now + 1860).size(), 1);
+        QVERIFY(resumed.warning());
+        resumed.acknowledge();
+        QVERIFY(resumed.update(frame(failed, now + 1920), now + 1920).isEmpty());
+        QVERIFY(resumed.warning());
+        resumed.update(frame(drive(), now + 1980), now + 1980);
+        QVERIFY(!resumed.warning());
+    }
+    void recoveryAndGapsResetReadFailurePeriod() {
+        Monitor m; m.update(frame(), now);
+        auto failed = drive(); failed["error"] = "timeout";
+        for (int elapsed = 60; elapsed <= 1800; elapsed += 60)
+            m.update(frame(failed, now + elapsed), now + elapsed);
+        m.update(frame(drive(), now + 1860), now + 1860);
+        QVERIFY(m.update(frame(failed, now + 1920), now + 1920).isEmpty());
+        // Missing observations cannot establish continuous failures, even after a restart.
+        Monitor resumed(m.state());
+        QVERIFY(resumed.update(frame(failed, now + 4000), now + 4000).isEmpty());
+        QVERIFY(!resumed.warning());
+        // Polling the same still-fresh snapshot doesn't advance the failure period.
+        QVERIFY(resumed.update(frame(failed, now + 4000), now + 4250).isEmpty());
+        QVERIFY(!resumed.warning());
+    }
+    void healthFailuresStillAlertDuringReadGracePeriod() {
+        Monitor m;
+        auto failed = drive(); failed["error"] = "incomplete read"; failed["passed"] = false;
+        QCOMPARE(m.update(frame(failed), now).size(), 1);
+        QVERIFY(m.drives()[0].toObject()["active"].toObject().contains("failed"));
+        QVERIFY(!m.drives()[0].toObject()["active"].toObject().contains("read"));
     }
     void disconnectedDriveAndForget() {
         Monitor m; m.update(frame(), now);

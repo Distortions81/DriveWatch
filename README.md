@@ -1,7 +1,5 @@
 # DriveWatch
 
-[![Build and test](https://github.com/Distortions81/DriveWatch/actions/workflows/build.yml/badge.svg)](https://github.com/Distortions81/DriveWatch/actions/workflows/build.yml)
-
 A small Linux tray app that watches for **new drive health problems**, with a compact click-to-open overview, desktop notifications, and persistent warning icons. Designed for KDE Plasma; uses Qt's StatusNotifierItem integration and follows your desktop palette.
 
 ![DriveWatch tray overview](docs/screenshots/tray.png)
@@ -19,16 +17,16 @@ Screenshots show synthetic data using Qt's fallback theme. Fonts and colors foll
 - Current SMART failure flags, NVMe critical warnings, failing ATA attributes, nonzero pending/offline-uncorrectable sectors, overheating, and worn-out endurance estimates warn even on first observation.
 - Lifetime media errors and old thermal events are recorded as the initial baseline. Generic NVMe command error counts and unsafe shutdowns are visible, but do not independently trigger alerts.
 - Warning icon remains until changes are acknowledged. Active faults remain visible even after acknowledgement.
-- Missing drives, unreadable SMART data, missing temperatures, invalid collector output, and stale readings are explicit warnings.
+- SMART read failures warn after 30 minutes of consecutive failed checks; a successful read resets the period. Missing drives, missing temperatures, invalid collector output, and stale readings remain explicit warnings.
 - Login autostart enabled after installation, with a per-user toggle in Settings.
 - No database, web server, Python packages, or KDE Frameworks dependencies.
 
 ## Install the Debian package
 
-Download a `.deb` from [GitHub Releases](https://github.com/Distortions81/DriveWatch/releases), or build a package as below. Install it on a machine running systemd and a desktop session:
+Build a package as below, then install it on a machine running systemd and a desktop session:
 
 ```sh
-sudo apt install ./build/drivewatch_0.1.1_amd64.deb
+sudo apt install ./build/drivewatch_0.1.3_amd64.deb
 drivewatch --show
 ```
 
@@ -48,7 +46,7 @@ ctest --test-dir build --output-on-failure
 (cd build && cpack -G DEB)
 ```
 
-The `.deb` is written to `build/`. GitHub Actions also builds and attaches a package artifact for pushes and pull requests. It does not publish a release automatically.
+The `.deb` is written to `build/`. GitHub Actions also builds and attaches a package artifact for pushes and pull requests. Release commits on `main` whose message starts with `Release v` publish a preview release after the build and tests pass, using matching notes in `docs/releases/vVERSION.md`.
 
 To try the interface before installing (synthetic data; no root required):
 
@@ -61,7 +59,7 @@ The demo does not change real settings, baselines, autostart preferences, or sen
 
 ## How monitoring works
 
-`drivewatch-collector.timer` runs the root-owned, fixed-command collector once per minute. It discovers physical SATA/SAS/SCSI, NVMe namespaces, and MMC block devices from sysfs and runs `smartctl -x -j` with bounded timeouts. Unsupported hardware is shown as unreadable. Device-mapper/RAID virtual volumes, loop devices, and partitions are excluded. Hardware behind RAID bridges may require extra smartctl support and is not automatically enumerated behind controllers.
+`drivewatch-collector.timer` runs the root-owned, fixed-command collector once per minute. It discovers physical SATA/SAS/SCSI, NVMe namespaces, and MMC block devices from sysfs and runs `smartctl -x -j` with a 90-second timeout per drive. Unsupported hardware is shown as unreadable. Device-mapper/RAID virtual volumes, loop devices, and partitions are excluded. Hardware behind RAID bridges may require extra smartctl support and is not automatically enumerated behind controllers.
 
 The collector accepts no user commands or arguments and performs no repairs, formats, self-tests, firmware changes, or SMART enable/disable operations. It atomically writes `/run/drivewatch/snapshot.json`. This file is readable by local users and includes drive serial numbers. The systemd service limits privileges and writes to its runtime directory; the desktop app never runs as root and does not launch privileged processes.
 
@@ -86,9 +84,12 @@ sudo systemctl disable --now drivewatch-collector.timer
 | Endurance used | Warning at 90%; critical at 100% | Escalate at threshold |
 | Temperature | Warning at 65°C / 149°F; critical at 75°C / 167°F | Clear after cooling by 5°C / 9°F |
 | Old thermal minutes, generic command errors, unsafe shutdowns | Display history | No standalone alert |
-| Missing/unreadable drives or monitoring data | Explicit warning | Clear after recovery |
+| Unreadable SMART data | Warn after 30 minutes of consecutive failed checks | Successful read resets the period |
+| Missing drives or monitoring data | Explicit warning | Clear after recovery |
 
 Temperature thresholds are configurable. They are conservative app settings, **not universal manufacturer operating limits**. Hardware-reported critical warnings always apply. Lower endurance use is better; higher available spare is better. Wear estimates do not predict remaining years. A historical nonzero media-error count does not alone color a drive red.
+
+Read-failure confirmation persists across app restarts and uses fresh collector timestamps; a gap of more than five minutes between failed samples restarts confirmation. Pending failures remain visible in drive details without creating an alert or warning icon. Existing health faults remain active during read failures, and actual health failures still alert immediately.
 
 Notifications for the same drive and issue/severity are limited to one per 30 minutes. Every detected change still enters the alert log and keeps the warning icon visible until acknowledged. Alert counts are health events, not a probability of failure. Notifications may be suppressed by your desktop's Do Not Disturb settings; the tray warning persists.
 

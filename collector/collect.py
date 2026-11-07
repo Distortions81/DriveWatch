@@ -12,6 +12,7 @@ import time
 
 OUTPUT = Path('/run/drivewatch/snapshot.json')
 SMARTCTL = '/usr/sbin/smartctl'
+SMART_TIMEOUT_SECONDS = 90
 DEVICE = re.compile(r'(sd[a-z]+|nvme\d+n\d+|mmcblk\d+|hd[a-z]+)\Z')
 
 
@@ -111,7 +112,7 @@ def discover(sys_block=Path('/sys/class/block')):
 
 def collect_one(device, physical_path, runner=subprocess.run):
     try:
-        proc = runner([SMARTCTL, '-x', '-j', device], capture_output=True, text=True, timeout=25,
+        proc = runner([SMARTCTL, '-x', '-j', device], capture_output=True, text=True, timeout=SMART_TIMEOUT_SECONDS,
                       env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'})
         data = json.loads(proc.stdout)
         if not isinstance(data, dict):

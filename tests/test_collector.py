@@ -57,6 +57,7 @@ class CollectorTests(unittest.TestCase):
         def runner(argv, **kwargs):
             self.assertEqual(argv, [c.SMARTCTL, '-x', '-j', '/dev/nvme0'])
             self.assertNotIn('shell', kwargs)
+            self.assertEqual(kwargs['timeout'], 90)
             return subprocess.CompletedProcess(argv, status, json.dumps(data))
         return c.collect_one('/dev/nvme0', '/sys/a', runner)
 
@@ -81,7 +82,8 @@ class CollectorTests(unittest.TestCase):
 
     def test_timeout_and_malformed_output(self):
         def timeout(*args, **kwargs):
-            raise subprocess.TimeoutExpired('smartctl', 25)
+            self.assertEqual(kwargs['timeout'], 90)
+            raise subprocess.TimeoutExpired('smartctl', 90)
         self.assertIn('error', c.collect_one('/dev/sda', '/sys/a', timeout))
         def malformed(*args, **kwargs):
             return subprocess.CompletedProcess([], 0, 'not json')
