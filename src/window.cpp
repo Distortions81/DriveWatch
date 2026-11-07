@@ -252,6 +252,21 @@ Window::Window(bool demo, bool demoWarning, int initialTab)
     m_mini->setMinimumWidth(370);
     auto *miniLayout = new QVBoxLayout(m_mini);
     miniLayout->setContentsMargins(14, 12, 14, 10);
+    auto *miniTitle = new QLabel("DriveWatch");
+    auto miniFont = miniTitle->font(); miniFont.setBold(true); miniFont.setPointSize(14); miniTitle->setFont(miniFont);
+    miniLayout->addWidget(miniTitle);
+    m_miniSummary = new QLabel;
+    m_miniSummary->setTextFormat(Qt::PlainText);
+    m_miniSummary->setWordWrap(true);
+    miniLayout->addWidget(m_miniSummary);
+    m_miniCoverage = new QLabel;
+    m_miniCoverage->setTextFormat(Qt::PlainText);
+    m_miniCoverage->setWordWrap(true); m_miniCoverage->setMaximumWidth(360);
+    miniLayout->addWidget(m_miniCoverage);
+    if (m_demo) miniLayout->addWidget(new QLabel("PREVIEW · Synthetic readings"));
+    m_miniGuide = new QLabel;
+    m_miniGuide->setWordWrap(true);
+    miniLayout->addWidget(m_miniGuide);
     auto *miniAction = new QWidgetAction(menu);
     miniAction->setDefaultWidget(m_mini);
     menu->addAction(miniAction);
@@ -417,16 +432,40 @@ void Window::render() {
 
 void Window::renderMini() {
     auto *layout = qobject_cast<QVBoxLayout *>(m_mini->layout());
-    while (auto *item = layout->takeAt(0)) { delete item->widget(); delete item; }
-    auto *title = new QLabel("DriveWatch");
-    auto font = title->font(); font.setBold(true); font.setPointSize(14); title->setFont(font);
-    layout->addWidget(title);
-    auto *summary = new QLabel(m_status->text());
-    summary->setTextFormat(Qt::PlainText);
-    summary->setWordWrap(true);
-    layout->addWidget(summary);
+    // A live QWidgetAction must keep its child widgets across polling updates.
+    // Replacing the entire tree while QMenu is open can leave the hosted panel blank.
+    m_miniSummary->setText(m_status->text());
+    QSet<QString> seen;
+    int position = 2;
     for (const auto v : m_monitor.drives()) {
         auto r = v.toObject(); auto d = r.value("sample").toObject();
+        const auto id = r.value("id").toString();
+        seen.insert(id);
+        if (!m_miniRows.contains(id)) {
+            MiniDriveRow row;
+            row.widget = new QWidget(m_mini);
+            auto *line = new QHBoxLayout(row.widget);
+            line->setContentsMargins(0, 6, 0, 6); line->setSpacing(10);
+            row.icon = new QLabel;
+            line->addWidget(row.icon);
+            auto *labels = new QWidget;
+            auto *texts = new QVBoxLayout(labels); texts->setContentsMargins(0, 0, 0, 0); texts->setSpacing(2);
+            row.model = new QLabel;
+            row.model->setTextFormat(Qt::PlainText);
+            auto modelFont = row.model->font(); modelFont.setBold(true); row.model->setFont(modelFont);
+            texts->addWidget(row.model);
+            row.detail = new QLabel;
+            row.detail->setTextFormat(Qt::PlainText); texts->addWidget(row.detail);
+            line->addWidget(labels, 1);
+            row.temperature = new QLabel;
+            auto tempFont = row.temperature->font(); tempFont.setBold(true); tempFont.setPointSize(12); row.temperature->setFont(tempFont);
+            line->addWidget(row.temperature);
+            layout->insertWidget(position, row.widget);
+            row.widget->show();
+            m_miniRows.insert(id, row);
+        }
+        ++position;
+        auto &row = m_miniRows[id];
         bool unread = false;
         for (const auto e : m_monitor.events())
             if (e.toObject().value("drive_id") == r.value("id") && !e.toObject().value("acknowledged").toBool()) unread = true;
@@ -435,39 +474,29 @@ void Window::renderMini() {
         bool critical = false;
         for (const auto c : conditions) critical |= c.toObject().value("level").toString() == "critical";
         const bool disconnected = !r.value("connected").toBool();
-        auto *row = new QWidget;
-        auto *line = new QHBoxLayout(row);
-        line->setContentsMargins(0, 6, 0, 6); line->setSpacing(10);
-        auto *icon = new QLabel;
-        icon->setPixmap(statusIcon(active || unread).pixmap(24, 24));
-        line->addWidget(icon);
-        auto *labels = new QWidget;
-        auto *texts = new QVBoxLayout(labels); texts->setContentsMargins(0, 0, 0, 0); texts->setSpacing(2);
-        auto *model = new QLabel(d.value("model").toString());
-        model->setTextFormat(Qt::PlainText);
-        auto modelFont = model->font(); modelFont.setBold(true); model->setFont(modelFont);
-        texts->addWidget(model);
+        row.icon->setPixmap(statusIcon(active || unread).pixmap(24, 24));
+        row.model->setText(d.value("model").toString());
         QString state = disconnected ? "Disconnected" : (critical ? "Critical warning" : (active ? "Active warning" : (unread ? "New health change" : "Stable")));
-        auto *detail = new QLabel(d.value("device").toString() + " · " + state);
-        detail->setTextFormat(Qt::PlainText); texts->addWidget(detail);
-        colorLabel(detail, critical ? 1.0 : ((active || unread) ? 0.5 : 0.0));
-        line->addWidget(labels, 1);
-        auto *temperature = new QLabel(d.contains("error") || disconnected || !d.contains("temperature") ? "—" : temperatureText(d.value("temperature").toDouble()));
-        auto tempFont = temperature->font(); tempFont.setBold(true); tempFont.setPointSize(12); temperature->setFont(tempFont);
+        row.detail->setText(d.value("device").toString() + " · " + state);
+        colorLabel(row.detail, critical ? 1.0 : ((active || unread) ? 0.5 : 0.0));
+        row.temperature->setText(d.contains("error") || disconnected || !d.contains("temperature") ? "—" : temperatureText(d.value("temperature").toDouble()));
+        row.temperature->setPalette(qApp->palette());
         if (!d.contains("error") && !disconnected && d.contains("temperature"))
-            colorLabel(temperature, temperatureRisk(d.value("temperature").toDouble(), policy()));
-        line->addWidget(temperature);
-        layout->addWidget(row);
+            colorLabel(row.temperature, temperatureRisk(d.value("temperature").toDouble(), policy()));
     }
-    if (m_monitor.drives().isEmpty() || !m_monitor.state().value("global").toObject().isEmpty() || m_saveFailed) {
-        auto *coverage = new QLabel(m_subtitle->text());
-        coverage->setTextFormat(Qt::PlainText); coverage->setWordWrap(true); coverage->setMaximumWidth(360);
-        layout->addWidget(coverage);
+    for (auto it = m_miniRows.begin(); it != m_miniRows.end();) {
+        if (seen.contains(it.key())) { ++it; continue; }
+        it->widget->hide();
+        layout->removeWidget(it->widget);
+        it->widget->deleteLater();
+        it = m_miniRows.erase(it);
     }
-    if (m_demo) layout->addWidget(new QLabel("PREVIEW · Synthetic readings"));
-    auto *guide = new QLabel(QString("Warning %1 · Critical %2").arg(temperatureText(policy().warm), temperatureText(policy().hot)));
-    guide->setWordWrap(true); layout->addWidget(guide);
-    m_mini->adjustSize();
+    m_miniCoverage->setText(m_subtitle->text());
+    m_miniCoverage->setVisible(m_monitor.drives().isEmpty() || !m_monitor.state().value("global").toObject().isEmpty() || m_saveFailed);
+    m_miniGuide->setText(QString("Warning %1 · Critical %2").arg(temperatureText(policy().warm), temperatureText(policy().hot)));
+    m_mini->updateGeometry();
+    m_mini->update();
+    if (!m_popup->isVisible()) m_mini->adjustSize();
 }
 
 QWidget *Window::trayPopup() const { return m_popup; }

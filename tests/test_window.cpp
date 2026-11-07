@@ -3,6 +3,7 @@
 #include <QCheckBox>
 #include <QFile>
 #include <QLabel>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTableWidget>
@@ -57,6 +58,24 @@ private slots:
         startup->setChecked(true);
         QVERIFY(f.open(QIODevice::ReadOnly));
         QVERIFY(f.readAll().contains("Hidden=false"));
+    }
+    void popupReadingsStayVisibleAcrossRefreshes() {
+        Window window(true, true);
+        window.poll();
+        window.showTrayPopup();
+        auto *popup = window.trayPopup();
+        const QRegularExpression temperature("^\\d+°C / \\d+°F$");
+        for (int refresh = 0; refresh < 4; ++refresh) {
+            // Leave the popup mapped through a real 10-second background timer tick too.
+            QTest::qWait(refresh == 3 ? 10500 : 30);
+            QVERIFY(popup->isVisible());
+            int visibleTemperatures = 0;
+            for (auto *label : popup->findChildren<QLabel *>())
+                if (temperature.match(label->text()).hasMatch() && label->isVisibleTo(popup))
+                    ++visibleTemperatures;
+            QCOMPARE(visibleTemperatures, 5);
+            window.poll();
+        }
     }
 };
 

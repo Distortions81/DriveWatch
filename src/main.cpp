@@ -11,7 +11,7 @@ int main(int argc, char **argv) {
     QApplication app(argc, argv);
     app.setApplicationName("DriveWatch");
     app.setOrganizationName("DriveWatch");
-    app.setApplicationVersion("0.1.0");
+    app.setApplicationVersion(DRIVEWATCH_VERSION);
     app.setDesktopFileName("io.github.drivewatch");
     app.setQuitOnLastWindowClosed(false);
     QCommandLineParser args;

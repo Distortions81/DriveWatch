@@ -47,6 +47,17 @@ private:
     QCheckBox *m_notifications;
     QMenu *m_popup;
     QWidget *m_mini;
+    struct MiniDriveRow {
+        QWidget *widget;
+        QLabel *icon;
+        QLabel *model;
+        QLabel *detail;
+        QLabel *temperature;
+    };
+    QMap<QString, MiniDriveRow> m_miniRows;
+    QLabel *m_miniSummary;
+    QLabel *m_miniCoverage;
+    QLabel *m_miniGuide;
     QTabWidget *m_tabs;
     Policy policy() const;
     void render();

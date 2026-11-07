@@ -28,7 +28,7 @@ Screenshots show synthetic data using Qt's fallback theme. Fonts and colors foll
 Download a `.deb` from [GitHub Releases](https://github.com/Distortions81/DriveWatch/releases), or build a package as below. Install it on a machine running systemd and a desktop session:
 
 ```sh
-sudo apt install ./build/drivewatch_0.1.0_amd64.deb
+sudo apt install ./build/drivewatch_0.1.1_amd64.deb
 drivewatch --show
 ```
 
