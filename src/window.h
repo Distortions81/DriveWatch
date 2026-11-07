@@ -1,0 +1,58 @@
+#pragma once
+#include "monitor.h"
+#include <QMainWindow>
+#include <QSettings>
+#include <QSystemTrayIcon>
+
+class QTableWidget;
+class QLabel;
+class QTextEdit;
+class QSpinBox;
+class QCheckBox;
+class QMenu;
+class QTabWidget;
+
+class Window : public QMainWindow {
+    Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "io.github.drivewatch")
+public:
+    explicit Window(bool demo = false, bool demoWarning = false, int initialTab = 0);
+    void poll();
+    QWidget *trayPopup() const;
+    void showTrayPopup();
+public slots:
+    void Show();
+protected:
+    void closeEvent(QCloseEvent *event) override;
+private:
+    bool m_demo;
+    bool m_demoWarning;
+    bool m_saveFailed = false;
+    QString m_statePath;
+    QString m_stateError;
+    Monitor m_monitor;
+    QSettings m_settings;
+    QSystemTrayIcon m_tray;
+    QLabel *m_status;
+    QLabel *m_subtitle;
+    QLabel *m_ranges;
+    QTableWidget *m_drives;
+    QTableWidget *m_history;
+    QTextEdit *m_details;
+    QSpinBox *m_warm;
+    QSpinBox *m_hot;
+    QLabel *m_warmF;
+    QLabel *m_hotF;
+    QCheckBox *m_startup;
+    QCheckBox *m_notifications;
+    QMenu *m_popup;
+    QWidget *m_mini;
+    QTabWidget *m_tabs;
+    Policy policy() const;
+    void render();
+    void renderMini();
+    void details();
+    void save();
+    void notify(const QString &title, const QString &text, bool critical = false);
+    bool setAutostart(bool enabled);
+};

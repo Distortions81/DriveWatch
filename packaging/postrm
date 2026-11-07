@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+if [ "$1" = remove ]; then
+    deb-systemd-helper mask drivewatch-collector.timer >/dev/null || true
+fi
+if [ "$1" = purge ]; then
+    deb-systemd-helper purge drivewatch-collector.timer >/dev/null || true
+    deb-systemd-helper unmask drivewatch-collector.timer >/dev/null || true
+fi
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+fi

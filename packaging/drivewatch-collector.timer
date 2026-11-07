@@ -1,0 +1,11 @@
+[Unit]
+Description=Check drive health every minute
+
+[Timer]
+OnBootSec=20s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+Unit=drivewatch-collector.service
+
+[Install]
+WantedBy=timers.target

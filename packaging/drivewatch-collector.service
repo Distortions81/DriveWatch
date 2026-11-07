@@ -1,0 +1,25 @@
+[Unit]
+Description=Collect read-only drive health for DriveWatch
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/drivewatch/collect
+RuntimeDirectory=drivewatch
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+UMask=0022
+TimeoutStartSec=180
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+# Raw-device ioctls require these; PrivateDevices would hide the drives.
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_RAWIO

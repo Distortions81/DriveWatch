@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=DriveWatch
+Comment=Monitor drive health and temperature in the system tray
+Exec=drivewatch
+Icon=drivewatch
+Terminal=false
+Categories=System;Monitor;
+X-GNOME-Autostart-enabled=true
