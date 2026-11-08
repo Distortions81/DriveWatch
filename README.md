@@ -1,11 +1,10 @@
 # M45 Drive Watcher
 
+![M45 Drive Watcher overview](docs/screenshots/drives.png)
+
 A small Linux tray app that watches for **new drive health problems**, with a compact click-to-open overview, desktop notifications, and persistent warning icons. Designed for KDE Plasma; uses Qt's StatusNotifierItem integration and follows your desktop palette.
 
-![M45 Drive Watcher tray overview](docs/screenshots/tray.png)
-![M45 Drive Watcher tray warning](docs/screenshots/tray-warning.png)
-
-Screenshots show synthetic data using Qt's fallback theme. Fonts and colors follow the active desktop theme when running normally. The warning screenshot simulates new media errors and overheating; it is not a report about any real drive.
+Screenshots show synthetic data using a consistent dark theme. Fonts and colors follow the active desktop theme when running normally. The warning screenshot simulates new media errors and overheating; it is not a report about any real drive.
 
 ## Features
 
@@ -101,12 +100,13 @@ For SATA drives that report a bogus current temperature of 0°C, M45 Drive Watch
 
 ## Screenshots
 
-![Drive overview](docs/screenshots/drives.png)
+![M45 Drive Watcher tray overview](docs/screenshots/tray.png)
+![M45 Drive Watcher tray warning](docs/screenshots/tray-warning.png)
 ![Drive health warning](docs/screenshots/warning.png)
 ![Alert history](docs/screenshots/history.png)
 ![Settings](docs/screenshots/settings.png)
 
-Regenerate captures directly from the built app:
+Regenerate dark-mode captures directly from the built app:
 
 ```sh
 ./scripts/render-screenshots.sh
