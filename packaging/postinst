@@ -1,16 +1,16 @@
 #!/bin/sh
 set -e
 if [ "$1" = configure ]; then
-    deb-systemd-helper unmask drivewatch-collector.timer >/dev/null || true
+    deb-systemd-helper unmask m45-drive-watcher-collector.timer >/dev/null || true
     # Default on for new installs; preserve administrator-disabled timers on upgrade.
-    if deb-systemd-helper --quiet was-enabled drivewatch-collector.timer; then
-        deb-systemd-helper enable drivewatch-collector.timer >/dev/null || true
+    if deb-systemd-helper --quiet was-enabled m45-drive-watcher-collector.timer; then
+        deb-systemd-helper enable m45-drive-watcher-collector.timer >/dev/null || true
     else
-        deb-systemd-helper update-state drivewatch-collector.timer >/dev/null || true
+        deb-systemd-helper update-state m45-drive-watcher-collector.timer >/dev/null || true
     fi
     if [ -d /run/systemd/system ]; then
         systemctl daemon-reload
-        deb-systemd-invoke start drivewatch-collector.timer || true
+        deb-systemd-invoke start m45-drive-watcher-collector.timer || true
     fi
 fi
 # Desktop sessions pick up the global autostart entry at next login.

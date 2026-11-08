@@ -14,7 +14,7 @@ class QTabWidget;
 
 class Window : public QMainWindow {
     Q_OBJECT
-    Q_CLASSINFO("D-Bus Interface", "io.github.drivewatch")
+    Q_CLASSINFO("D-Bus Interface", "com.m45software.DriveWatcher")
 public:
     explicit Window(bool demo = false, bool demoWarning = false, int initialTab = 0);
     void poll();

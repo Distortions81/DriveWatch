@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import time
 
-OUTPUT = Path('/run/drivewatch/snapshot.json')
+OUTPUT = Path('/run/m45-drive-watcher/snapshot.json')
 SMARTCTL = '/usr/sbin/smartctl'
 SMART_TIMEOUT_SECONDS = 90
 DEVICE = re.compile(r'(sd[a-z]+|nvme\d+n\d+|mmcblk\d+|hd[a-z]+)\Z')

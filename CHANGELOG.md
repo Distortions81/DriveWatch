@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4
+
+- Rename the app to M45 Drive Watcher, with an M45 Software desktop/D-Bus identity and m45-drive-watcher executable, package, and collector units.
+- Preserve legacy DriveWatch user data and login preferences on first launch.
+
 ## 0.1.3
 
 - Increase the overview window height and reserve more space for drive details, with a font-scaled minimum height and a non-collapsing divider.

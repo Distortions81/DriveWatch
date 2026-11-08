@@ -1,11 +1,11 @@
 [Unit]
-Description=Collect read-only drive health for DriveWatch
+Description=Collect read-only drive health for M45 Drive Watcher
 After=local-fs.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/libexec/drivewatch/collect
-RuntimeDirectory=drivewatch
+ExecStart=/usr/libexec/m45-drive-watcher/collect
+RuntimeDirectory=m45-drive-watcher
 RuntimeDirectoryMode=0755
 RuntimeDirectoryPreserve=yes
 UMask=0022

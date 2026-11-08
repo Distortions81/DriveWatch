@@ -100,20 +100,39 @@ QJsonObject demoSnapshot() {
     return {{"version", 1}, {"collected_at", QDateTime::currentSecsSinceEpoch()}, {"drives", drives}};
 }
 QString autostartPath() {
-    return QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + "/autostart/io.github.drivewatch.desktop";
+    return QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + "/autostart/com.m45software.DriveWatcher.desktop";
 }
 }
 
 Window::Window(bool demo, bool demoWarning, int initialTab)
-    : m_demo(demo), m_demoWarning(demoWarning), m_settings(demo ? "DriveWatchPreview" : "DriveWatch", "DriveWatch") {
-    setWindowTitle(demo ? "DriveWatch — Preview" : "DriveWatch");
+    : m_demo(demo), m_demoWarning(demoWarning), m_settings(demo ? "M45SoftwarePreview" : "M45Software", "m45-drive-watcher") {
+    setWindowTitle(demo ? "M45 Drive Watcher — Preview" : "M45 Drive Watcher");
     setWindowIcon(statusIcon(false));
     resize(1040, 820);
     m_statePath = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/state.json";
     if (!demo) {
+        // Copy legacy user data once, without overwriting a new installation's data.
+        const auto legacyState = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
+                               + "/DriveWatch/DriveWatch/state.json";
+        if (!QFile::exists(m_statePath) && QFile::exists(legacyState)) {
+            if (!QDir().mkpath(QFileInfo(m_statePath).absolutePath()) || !QFile::copy(legacyState, m_statePath))
+                m_stateError = "Cannot migrate the DriveWatch baseline. Fix access and restart M45 Drive Watcher.";
+        }
+        QSettings legacySettings("DriveWatch", "DriveWatch");
+        if (!QFile::exists(m_settings.fileName()) && QFile::exists(legacySettings.fileName())) {
+            for (const auto &key : legacySettings.allKeys()) m_settings.setValue(key, legacySettings.value(key));
+            m_settings.sync();
+        }
+        const auto legacyAutostart = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
+                                   + "/autostart/io.github.drivewatch.desktop";
+        if (!QFile::exists(autostartPath()) && QFile::exists(legacyAutostart)) {
+            QSettings entry(legacyAutostart, QSettings::IniFormat);
+            entry.beginGroup("Desktop Entry");
+            setAutostart(!entry.value("Hidden", false).toBool());
+        }
         QFile f(m_statePath);
         if (f.exists()) {
-            if (!f.open(QIODevice::ReadOnly)) m_stateError = "Cannot read saved baseline. Fix access and restart DriveWatch.";
+            if (!f.open(QIODevice::ReadOnly)) m_stateError = "Cannot read saved baseline. Fix access and restart M45 Drive Watcher.";
             else {
                 QJsonParseError error;
                 auto doc = QJsonDocument::fromJson(f.readAll(), &error);
@@ -127,7 +146,7 @@ Window::Window(bool demo, bool demoWarning, int initialTab)
     auto *layout = new QVBoxLayout(central);
     layout->setContentsMargins(24, 20, 24, 20);
     layout->setSpacing(12);
-    auto *title = new QLabel("DriveWatch");
+    auto *title = new QLabel("M45 Drive Watcher");
     auto titleFont = title->font(); titleFont.setPointSize(23); titleFont.setBold(true); title->setFont(titleFont);
     layout->addWidget(title);
     m_status = new QLabel;
@@ -178,7 +197,7 @@ Window::Window(bool demo, bool demoWarning, int initialTab)
     tabs->addTab(m_history, "Alert history");
     auto *settings = new QWidget;
     auto *form = new QFormLayout(settings);
-    m_startup = new QCheckBox("Start DriveWatch when I log in");
+    m_startup = new QCheckBox("Start M45 Drive Watcher when I log in");
     QSettings entry(autostartPath(), QSettings::IniFormat);
     entry.beginGroup("Desktop Entry");
     m_startup->setChecked(!entry.value("Hidden", false).toBool());
@@ -224,7 +243,7 @@ Window::Window(bool demo, bool demoWarning, int initialTab)
     connect(ack, &QPushButton::clicked, this, [this] { m_monitor.acknowledge(); save(); render(); });
     connect(refresh, &QPushButton::clicked, this, &Window::poll);
     connect(hide, &QPushButton::clicked, this, &QWidget::hide);
-    connect(test, &QPushButton::clicked, this, [this] { notify("DriveWatch test", "DriveWatch notifications are working."); });
+    connect(test, &QPushButton::clicked, this, [this] { notify("M45 Drive Watcher test", "M45 Drive Watcher notifications are working."); });
     connect(forget, &QPushButton::clicked, this, [this] { m_monitor.forgetDisconnected(); save(); render(); });
     connect(m_startup, &QCheckBox::toggled, this, [this](bool enabled) {
         if (!setAutostart(enabled)) {
@@ -256,7 +275,7 @@ Window::Window(bool demo, bool demoWarning, int initialTab)
     m_mini->setMinimumWidth(370);
     auto *miniLayout = new QVBoxLayout(m_mini);
     miniLayout->setContentsMargins(14, 12, 14, 10);
-    auto *miniTitle = new QLabel("DriveWatch");
+    auto *miniTitle = new QLabel("M45 Drive Watcher");
     auto miniFont = miniTitle->font(); miniFont.setBold(true); miniFont.setPointSize(14); miniTitle->setFont(miniFont);
     miniLayout->addWidget(miniTitle);
     m_miniSummary = new QLabel;
@@ -275,15 +294,15 @@ Window::Window(bool demo, bool demoWarning, int initialTab)
     miniAction->setDefaultWidget(m_mini);
     menu->addAction(miniAction);
     menu->addSeparator();
-    menu->addAction("Open DriveWatch", this, &Window::Show);
+    menu->addAction("Open M45 Drive Watcher", this, &Window::Show);
     menu->addAction("Settings…", this, [this] { m_tabs->setCurrentIndex(2); Show(); });
     menu->addAction("Reload readings", this, &Window::poll);
     menu->addAction("Acknowledge alerts", this, [this] { m_monitor.acknowledge(); save(); render(); });
     menu->addSeparator();
-    menu->addAction("Quit DriveWatch", qApp, &QApplication::quit);
+    menu->addAction("Quit M45 Drive Watcher", qApp, &QApplication::quit);
     m_tray.setContextMenu(menu);
     m_tray.setIcon(statusIcon(false));
-    m_tray.setToolTip("DriveWatch — waiting for readings");
+    m_tray.setToolTip("M45 Drive Watcher — waiting for readings");
     connect(&m_tray, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
         if (reason == QSystemTrayIcon::Trigger) showTrayPopup();
         if (reason == QSystemTrayIcon::DoubleClick) { m_popup->hide(); Show(); }
@@ -323,9 +342,9 @@ void Window::poll() {
         m_monitor.update(sample, now, policy());
     }
     else {
-        QFile f("/run/drivewatch/snapshot.json");
+        QFile f("/run/m45-drive-watcher/snapshot.json");
         if (!f.open(QIODevice::ReadOnly))
-            notifications = m_monitor.unavailable("Collector unavailable. Check drivewatch-collector.timer and service.", now, policy());
+            notifications = m_monitor.unavailable("Collector unavailable. Check m45-drive-watcher-collector.timer and service.", now, policy());
         else {
             QJsonParseError error;
             auto doc = QJsonDocument::fromJson(f.readAll(), &error);
@@ -337,12 +356,12 @@ void Window::poll() {
     save(); render();
     if (!notifications.isEmpty() && m_notifications->isChecked()) {
         QString text = notifications.mid(0, 4).join('\n');
-        if (notifications.size() > 4) text += QString("\nAnd %1 more. Open DriveWatch for details.").arg(notifications.size() - 4);
+        if (notifications.size() > 4) text += QString("\nAnd %1 more. Open M45 Drive Watcher for details.").arg(notifications.size() - 4);
         bool critical = false;
         for (const auto v : m_monitor.drives())
             for (const auto c : v.toObject().value("active").toObject())
                 critical |= c.toObject().value("level").toString() == "critical";
-        notify("DriveWatch — drive health alert", text, critical);
+        notify("M45 Drive Watcher — drive health alert", text, critical);
     }
 }
 
@@ -374,7 +393,7 @@ void Window::render() {
         "Drive limits vary by model. Endurance used: warning at 90%, critical at 100%. Old error counts are baselined.")
         .arg(temperatureText(policy().warm), temperatureText(policy().hot)));
     m_tray.setIcon(statusIcon(warn));
-    m_tray.setToolTip("DriveWatch — " + m_status->text() + '\n' + m_monitor.coverage());
+    m_tray.setToolTip("M45 Drive Watcher — " + m_status->text() + '\n' + m_monitor.coverage());
     QString selected;
     if (m_drives->currentRow() >= 0 && m_drives->item(m_drives->currentRow(), 0))
         selected = m_drives->item(m_drives->currentRow(), 0)->data(Qt::UserRole).toString();
@@ -544,7 +563,7 @@ bool Window::setAutostart(bool enabled) {
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
     QSaveFile f(path);
     if (!f.open(QIODevice::WriteOnly)) return false;
-    QByteArray contents = "[Desktop Entry]\nType=Application\nName=DriveWatch\nExec=drivewatch\nIcon=drivewatch\nTerminal=false\nHidden=";
+    QByteArray contents = "[Desktop Entry]\nType=Application\nName=M45 Drive Watcher\nExec=m45-drive-watcher\nIcon=m45-drive-watcher\nTerminal=false\nHidden=";
     contents += enabled ? "false\n" : "true\n";
     contents += "X-GNOME-Autostart-enabled=";
     contents += enabled ? "true\n" : "false\n";
@@ -556,11 +575,11 @@ void Window::notify(const QString &title, const QString &text, bool critical) {
     QDBusInterface service("org.freedesktop.Notifications", "/org/freedesktop/Notifications",
                            "org.freedesktop.Notifications", QDBusConnection::sessionBus());
     QVariantMap hints;
-    hints["desktop-entry"] = "io.github.drivewatch";
+    hints["desktop-entry"] = "com.m45software.DriveWatcher";
     hints["urgency"] = QVariant::fromValue(static_cast<uchar>(critical ? 2 : 1));
     hints["category"] = "device.error";
     if (service.isValid()) {
-        service.asyncCall("Notify", "DriveWatch", uint(0), "drivewatch", title, text, QStringList{}, hints, int(-1));
+        service.asyncCall("Notify", "M45 Drive Watcher", uint(0), "m45-drive-watcher", title, text, QStringList{}, hints, int(-1));
     } else {
         m_tray.showMessage(title, text, critical ? QSystemTrayIcon::Critical : QSystemTrayIcon::Warning);
     }
