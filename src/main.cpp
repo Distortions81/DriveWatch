@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QTimer>
+#include <QPalette>
 
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
@@ -24,7 +25,7 @@ int main(int argc, char **argv) {
     args.addOption({"demo", "Preview with synthetic data; never change real monitoring state or settings."});
     args.addOption({"demo-warning", "Show synthetic warning conditions (requires --demo)."});
     args.addOption({"page", "Initial page: drives, history, settings, tray.", "page", "drives"});
-    args.addOption({"screenshot", "Save a demo screenshot and exit (requires --demo).", "file"});
+    args.addOption({"screenshot", "Save a dark-themed demo screenshot and exit (requires --demo).", "file"});
     args.process(app);
     const bool demo = args.isSet("demo");
     if ((args.isSet("screenshot") || args.isSet("demo-warning")) && !demo) args.showHelp(2);
@@ -38,6 +39,27 @@ int main(int argc, char **argv) {
             existing.call("Show");
             return 0;
         }
+    }
+    if (args.isSet("screenshot")) {
+        // Keep documentation captures consistent across desktop themes.
+        app.setStyle("Fusion");
+        QPalette palette;
+        palette.setColor(QPalette::Window, QColor("#232629"));
+        palette.setColor(QPalette::WindowText, QColor("#eff0f1"));
+        palette.setColor(QPalette::Base, QColor("#1b1e20"));
+        palette.setColor(QPalette::AlternateBase, QColor("#292e32"));
+        palette.setColor(QPalette::Text, QColor("#eff0f1"));
+        palette.setColor(QPalette::Button, QColor("#31363b"));
+        palette.setColor(QPalette::ButtonText, QColor("#eff0f1"));
+        palette.setColor(QPalette::ToolTipBase, QColor("#31363b"));
+        palette.setColor(QPalette::ToolTipText, QColor("#eff0f1"));
+        palette.setColor(QPalette::Highlight, QColor("#3daee9"));
+        palette.setColor(QPalette::HighlightedText, QColor("#141719"));
+        palette.setColor(QPalette::Link, QColor("#3daee9"));
+        palette.setColor(QPalette::Disabled, QPalette::Text, QColor("#8b9298"));
+        palette.setColor(QPalette::Disabled, QPalette::WindowText, QColor("#8b9298"));
+        palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor("#8b9298"));
+        app.setPalette(palette);
     }
     Window window(demo, args.isSet("demo-warning"), page);
     if (!demo) bus.registerObject("/M45DriveWatcher", &window, QDBusConnection::ExportAllSlots);
