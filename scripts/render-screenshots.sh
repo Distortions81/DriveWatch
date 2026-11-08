@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-binary=${1:-build/drivewatch}
+binary=${1:-build/m45-drive-watcher}
 mkdir -p docs/screenshots
 export QT_QPA_PLATFORM=offscreen
 "$binary" --demo --screenshot docs/screenshots/drives.png

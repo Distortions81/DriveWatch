@@ -2,6 +2,8 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QFile>
+#include <QDir>
+#include <QJsonDocument>
 #include <QLabel>
 #include <QRegularExpression>
 #include <QSettings>
@@ -41,8 +43,48 @@ private slots:
         window.showTrayPopup();
         QVERIFY(!popup->isVisible());
     }
+    void legacyUserDataMigratesWithoutOverwritingNewData() {
+        const auto dataRoot = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+        const auto legacyPath = dataRoot + "/DriveWatch/DriveWatch/state.json";
+        QVERIFY(QDir().mkpath(QFileInfo(legacyPath).absolutePath()));
+        QFile legacy(legacyPath);
+        QVERIFY(legacy.open(QIODevice::WriteOnly));
+        legacy.write(R"({"version":1,"migration_marker":"retained"})"); legacy.close();
+        QSettings oldSettings("DriveWatch", "DriveWatch");
+        oldSettings.setValue("notifications", false); oldSettings.sync();
+        const auto oldStartup = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
+                              + "/autostart/io.github.drivewatch.desktop";
+        QVERIFY(QDir().mkpath(QFileInfo(oldStartup).absolutePath()));
+        QFile startup(oldStartup); QVERIFY(startup.open(QIODevice::WriteOnly));
+        startup.write("[Desktop Entry]\nHidden=true\n"); startup.close();
+        const auto statePath = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/state.json";
+        { Window preview(true); QVERIFY(!QFile::exists(statePath)); }
+        {
+            Window window(false);
+            QFile state(statePath); QVERIFY(state.open(QIODevice::ReadOnly));
+            QVERIFY(state.readAll().contains("retained"));
+            QSettings settings("M45Software", "m45-drive-watcher");
+            QCOMPARE(settings.value("notifications").toBool(), false);
+            for (auto *checkbox : window.findChildren<QCheckBox *>())
+                if (checkbox->text().contains("log in")) QVERIFY(!checkbox->isChecked());
+            settings.setValue("notifications", true); settings.sync();
+        }
+        QVERIFY(legacy.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        legacy.write(R"({"version":1,"migration_marker":"changed"})"); legacy.close();
+        {
+            Window window(false);
+            QFile state(statePath); QVERIFY(state.open(QIODevice::ReadOnly));
+            QVERIFY(state.readAll().contains("retained"));
+            QSettings settings("M45Software", "m45-drive-watcher");
+            QCOMPARE(settings.value("notifications").toBool(), true);
+        }
+        QVERIFY(QFile::exists(legacyPath));
+        QFile::remove(oldStartup);
+        QFile::remove(QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
+                      + "/autostart/com.m45software.DriveWatcher.desktop");
+    }
     void startupPreferenceCreatesAndUpdatesDesktopOverride() {
-        QSettings settings("DriveWatch", "DriveWatch");
+        QSettings settings("M45Software", "m45-drive-watcher");
         settings.setValue("notifications", false); settings.sync();
         Window window(false);
         QCheckBox *startup = nullptr;
@@ -52,7 +94,7 @@ private slots:
         QVERIFY(startup->isChecked());
         startup->setChecked(false);
         const auto path = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
-                        + "/autostart/io.github.drivewatch.desktop";
+                        + "/autostart/com.m45software.DriveWatcher.desktop";
         QFile f(path); QVERIFY(f.open(QIODevice::ReadOnly));
         QVERIFY(f.readAll().contains("Hidden=true")); f.close();
         startup->setChecked(true);
@@ -86,8 +128,8 @@ int main(int argc, char **argv) {
     qputenv("XDG_DATA_HOME", (sandbox.path() + "/data").toUtf8());
     qputenv("XDG_CACHE_HOME", (sandbox.path() + "/cache").toUtf8());
     QApplication app(argc, argv);
-    app.setApplicationName("DriveWatchTest");
-    app.setOrganizationName("DriveWatchTest");
+    app.setApplicationName("m45-drive-watcher");
+    app.setOrganizationName("M45Software");
     app.setQuitOnLastWindowClosed(false);
     WindowTests tests;
     return QTest::qExec(&tests, argc, argv);

@@ -1,5 +1,5 @@
 #!/bin/sh
 set -e
 if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
-    deb-systemd-invoke stop drivewatch-collector.timer drivewatch-collector.service || true
+    deb-systemd-invoke stop m45-drive-watcher-collector.timer m45-drive-watcher-collector.service || true
 fi

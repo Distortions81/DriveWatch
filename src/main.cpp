@@ -9,10 +9,12 @@
 
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
-    app.setApplicationName("DriveWatch");
-    app.setOrganizationName("DriveWatch");
-    app.setApplicationVersion(DRIVEWATCH_VERSION);
-    app.setDesktopFileName("io.github.drivewatch");
+    app.setApplicationName("m45-drive-watcher");
+    app.setApplicationDisplayName("M45 Drive Watcher");
+    app.setOrganizationName("M45Software");
+    app.setOrganizationDomain("m45software.com");
+    app.setApplicationVersion(M45_DRIVE_WATCHER_VERSION);
+    app.setDesktopFileName("com.m45software.DriveWatcher");
     app.setQuitOnLastWindowClosed(false);
     QCommandLineParser args;
     args.setApplicationDescription("Drive health monitoring for your system tray");
@@ -31,14 +33,14 @@ int main(int argc, char **argv) {
     auto bus = QDBusConnection::sessionBus();
     if (!demo) {
         if (!bus.isConnected()) qFatal("A desktop D-Bus session is required.");
-        if (!bus.registerService("io.github.drivewatch")) {
-            QDBusInterface existing("io.github.drivewatch", "/DriveWatch", "io.github.drivewatch", bus);
+        if (!bus.registerService("com.m45software.DriveWatcher")) {
+            QDBusInterface existing("com.m45software.DriveWatcher", "/M45DriveWatcher", "com.m45software.DriveWatcher", bus);
             existing.call("Show");
             return 0;
         }
     }
     Window window(demo, args.isSet("demo-warning"), page);
-    if (!demo) bus.registerObject("/DriveWatch", &window, QDBusConnection::ExportAllSlots);
+    if (!demo) bus.registerObject("/M45DriveWatcher", &window, QDBusConnection::ExportAllSlots);
     if (page == 3) QTimer::singleShot(100, &window, &Window::showTrayPopup);
     else if (demo || args.isSet("show")) window.Show();
     if (args.isSet("screenshot")) {

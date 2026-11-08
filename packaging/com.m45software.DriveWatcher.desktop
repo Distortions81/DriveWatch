@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=DriveWatch
+Name=M45 Drive Watcher
 Comment=Monitor drive health and temperature in the system tray
-Exec=drivewatch
-Icon=drivewatch
+Exec=m45-drive-watcher
+Icon=m45-drive-watcher
 Terminal=false
 Categories=System;Monitor;
 X-GNOME-Autostart-enabled=true
