@@ -10,6 +10,9 @@
 #include <QStandardPaths>
 #include <QTableWidget>
 #include <QTemporaryDir>
+#include <QTabWidget>
+#include <QPushButton>
+#include <QTextEdit>
 #include <QTest>
 
 class WindowTests : public QObject {
@@ -20,15 +23,66 @@ private slots:
         window.poll();
         auto *drives = window.findChild<QTableWidget *>("driveTable");
         QVERIFY(drives);
-        QCOMPARE(drives->rowCount(), 5);
+        QCOMPARE(drives->rowCount(), 7);
         bool dual = false;
         for (int i = 0; i < drives->rowCount(); ++i) {
-            dual |= drives->item(i, 2)->text() == "45°C / 113°F";
-            QVERIFY(drives->item(i, 2)->foreground().color().isValid());
+            dual |= drives->item(i, 3)->text() == "45°C / 113°F";
+            QVERIFY(drives->item(i, 3)->foreground().color().isValid());
         }
         QVERIFY(dual);
+        QCOMPARE(window.findChild<QLabel *>("summaryConnection")->text(), QString("Internal: NVMe"));
+        QCOMPARE(window.findChild<QLabel *>("summaryConnectionspeed")->text(), QString("PCIe 8.0 GT/s ×4"));
         const auto path = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/state.json";
         QVERIFY(!QFile::exists(path));
+    }
+    void driveCheckboxSuppressesWarningsAndPopupAndKeepsLabels() {
+        Window window(true, true);
+        window.poll();
+        auto *table = window.findChild<QTableWidget *>("driveTable");
+        int hotRow = -1;
+        for (int i = 0; i < table->rowCount(); ++i) {
+            QCOMPARE(table->item(i, 0)->checkState(), i < 5 ? Qt::Checked : Qt::Unchecked);
+            if (table->item(i, 3)->text() == "78°C / 172°F") hotRow = i;
+        }
+        QVERIFY(hotRow >= 0);
+        QCOMPARE(table->columnCount(), 5);
+        QVERIFY(table->alternatingRowColors());
+        QVERIFY(table->item(5, 4)->text().contains("External USB"));
+        QCOMPARE(table->item(5, 0)->text(), QString("Backups"));
+        QCOMPARE(table->item(5, 1)->text(), QString("Seagate Expansion SW"));
+        QCOMPARE(table->item(6, 2)->text(), QString("Monitoring off"));
+        for (int i = 0; i < table->rowCount(); ++i)
+            for (int col = 0; col < table->columnCount(); ++col) {
+                QVERIFY(!table->item(i, col)->text().contains("/dev/"));
+                QVERIFY(!table->item(i, col)->text().contains("/media/"));
+            }
+        auto *details = window.findChild<QTabWidget *>("driveDetails");
+        QVERIFY(details); QCOMPARE(details->currentIndex(), 0);
+        table->selectRow(5);
+        QCOMPARE(window.findChild<QLabel *>("summaryConnection")->text(), QString("External: USB"));
+        QCOMPARE(window.findChild<QLabel *>("summaryConnectionspeed")->text(), QString("5 Gb/s"));
+        auto *volumes = window.findChild<QTableWidget *>("volumeTable");
+        QCOMPARE(volumes->item(0, 0)->text(), QString("Backups"));
+        QCOMPARE(volumes->item(0, 1)->text(), QString("/media/Backups"));
+        auto *diagnostics = window.findChild<QTextEdit *>("diagnosticOutput");
+        QVERIFY(diagnostics->isHidden());
+        details->setCurrentIndex(1);
+        window.findChild<QPushButton *>("diagnosticsToggle")->setChecked(true);
+        QVERIFY(!diagnostics->isHidden());
+        window.poll();
+        QCOMPARE(details->currentIndex(), 1);
+        table->item(hotRow, 0)->setCheckState(Qt::Unchecked);
+        QTest::qWait(30);
+        QCOMPARE(table->item(hotRow, 2)->text(), QString("Monitoring off"));
+        window.poll();
+        QCOMPARE(table->item(hotRow, 0)->checkState(), Qt::Unchecked);
+        bool hotVisible = false;
+        for (auto *label : window.trayPopup()->findChildren<QLabel *>())
+            hotVisible |= !label->isHidden() && label->text() == "78°C / 172°F";
+        QVERIFY(!hotVisible);
+        table->item(hotRow, 0)->setCheckState(Qt::Checked);
+        QTest::qWait(30);
+        QCOMPARE(table->item(hotRow, 2)->text(), QString("Critical"));
     }
     void popupShowsReadingsAndActions() {
         Window window(true, true);

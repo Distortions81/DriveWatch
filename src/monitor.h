@@ -21,6 +21,7 @@ public:
     QStringList update(const QJsonObject &snapshot, qint64 now, const Policy &policy = {});
     QStringList unavailable(const QString &reason, qint64 now, const Policy &policy = {});
     void acknowledge();
+    void setMonitored(const QString &id, bool enabled);
     void forgetDisconnected();
     bool warning() const;
     int unreadCount() const;
@@ -31,6 +32,7 @@ public:
 
 private:
     QJsonObject m_state;
+    void acknowledgeDrive(const QString &id);
     void event(const QString &id, const QString &key, const QString &message, const QString &level,
                qint64 now, const Policy &policy, QStringList &notifications);
     void active(QJsonObject &record, const QJsonObject &conditions, qint64 now,

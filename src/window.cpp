@@ -12,6 +12,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QGridLayout>
+#include <QGroupBox>
 #include <QHeaderView>
 #include <QJsonDocument>
 #include <QLabel>
@@ -20,9 +22,11 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QScrollArea>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStandardPaths>
+#include <QStyle>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTextEdit>
@@ -37,6 +41,63 @@ QString field(const QJsonObject &o, const QString &key, const QString &suffix = 
     auto v = o.value(key);
     if (v.isUndefined() || v.isNull()) return QString::fromUtf8("—");
     return (v.isString() ? v.toString() : QString::number(v.toDouble())) + suffix;
+}
+QString driveName(const QJsonObject &d) {
+    QStringList labels;
+    auto add = [&labels](const QJsonObject &v) {
+        const QString label = v.value("label").toString().trimmed();
+        if (!label.isEmpty() && label.compare("EFI", Qt::CaseInsensitive) != 0 &&
+            label.compare("EFI System Partition", Qt::CaseInsensitive) != 0 &&
+            label.compare("System Reserved", Qt::CaseInsensitive) != 0) labels << label;
+    };
+    add(d);
+    for (const auto p : d.value("partitions").toArray()) add(p.toObject());
+    labels.removeDuplicates();
+    return labels.isEmpty() ? d.value("model").toString() : labels.join(" · ");
+}
+QString capacity(const QJsonObject &d) {
+    if (!d.value("size_bytes").isDouble()) return "Unavailable";
+    const double bytes = d.value("size_bytes").toDouble();
+    return bytes >= 1e12 ? QString("%1 TB").arg(bytes / 1e12, 0, 'f', 1)
+                        : QString("%1 GB").arg(bytes / 1e9, 0, 'f', 0);
+}
+QString connectionType(const QJsonObject &d) {
+    const auto transport = d.value("transport").toString().toLower();
+    const QMap<QString, QString> names{{"nvme", "NVMe"}, {"sata", "SATA"}, {"ata", "ATA"},
+        {"sas", "SAS"}, {"scsi", "SCSI"}, {"usb", "USB"}, {"mmc", "MMC"}, {"sd", "SD"},
+        {"spi", "SPI"}, {"sbp", "FireWire"}, {"firewire", "FireWire"}, {"fc", "Fibre Channel"}, {"iscsi", "iSCSI"}};
+    QString type = names.value(transport, transport.toUpper());
+    if (type.isEmpty()) {
+        type = d.value("protocol").toString();
+        if (type.isEmpty() || type == "Unavailable") type = "Unknown";
+    }
+    if (transport == "iscsi" || transport == "fc") return "Network: " + type;
+    return (d.value("external").toBool() || transport == "usb" || type == "FireWire" ? "External: " : "Internal: ") + type;
+}
+QString driveStatus(const QJsonObject &r, bool critical, bool unread) {
+    const auto d = r.value("sample").toObject();
+    if (!r.value("monitored").toBool(true)) return "Monitoring off";
+    if (!r.value("connected").toBool()) return "Disconnected";
+    if (critical) return "Critical";
+    if (!r.value("active").toObject().isEmpty()) return "Warning";
+    if (unread) return "New change";
+    if (d.value("smart_support") == "unsupported") return "SMART unavailable";
+    if (d.contains("error")) return "SMART unavailable";
+    return "Stable";
+}
+QString relativeUpdate(qint64 stamp, qint64 now) {
+    const qint64 age = std::max(qint64(0), now - stamp);
+    if (age < 60) return "Updated just now";
+    if (age < 3600) {
+        const auto minutes = age / 60;
+        return minutes == 1 ? "Updated 1 minute ago" : QString("Updated %1 minutes ago").arg(minutes);
+    }
+    if (age < 86400) {
+        const auto hours = age / 3600;
+        return hours == 1 ? "Updated 1 hour ago" : QString("Updated %1 hours ago").arg(hours);
+    }
+    const auto days = age / 86400;
+    return days == 1 ? "Updated 1 day ago" : QString("Updated %1 days ago").arg(days);
 }
 QString temperatureText(double c) {
     return displayTemperature(c);
@@ -92,10 +153,21 @@ QJsonObject demoSnapshot() {
     for (int i = 0; i < 5; ++i) {
         drives.append(QJsonObject{{"id", QString("demo-%1").arg(i)}, {"model", models[i]},
             {"device", i == 0 ? "/dev/sda" : QString("/dev/nvme%1").arg(i - 1)},
-            {"serial", QString("DEMO-%1").arg(i)}, {"protocol", i == 0 ? "ATA" : "NVMe"},
+            {"label", QStringList{"Library", "System", "Backup SSD", "Backup SSD", "Projects"}[i]},
+            {"size_bytes", i == 0 ? 1e12 : 2e12}, {"serial", QString("DEMO-%1").arg(i)}, {"protocol", i == 0 ? "ATA" : "NVMe"}, {"transport", i == 0 ? "sata" : "nvme"},
+            {"connection_speed", i == 0 ? "6.0 Gb/s" : "PCIe 8.0 GT/s ×4"},
             {"temperature", temps[i]}, {"passed", true}, {"available_spare", i == 1 ? 92 : 100},
             {"percentage_used", i == 4 ? 21 : 3},
             {"counters", QJsonObject{{"media_errors", i == 1 ? "1135" : "0"}}}});
+    }
+    for (int i = 0; i < 2; ++i) {
+        drives.append(QJsonObject{{"id", QString("demo-usb-%1").arg(i)},
+            {"size_bytes", i == 0 ? 8e12 : 6e12}, {"model", i == 0 ? "Seagate Expansion SW" : "Seagate Expansion HDD"},
+            {"device", i == 0 ? "/dev/sdb" : "/dev/sdc"}, {"external", true}, {"transport", "usb"}, {"connection_speed", "5 Gb/s"},
+            {"smart_support", i == 0 ? "unavailable" : "unsupported"},
+            {"error", i == 0 ? "USB adapter did not provide SMART access." : "Device reports no SMART support."},
+            {"partitions", QJsonArray{QJsonObject{{"label", i == 0 ? "Backups" : "Archive"},
+                {"mountpoints", QJsonArray{i == 0 ? "/media/Backups" : "/media/Archive"}}}}}});
     }
     return {{"version", 1}, {"collected_at", QDateTime::currentSecsSinceEpoch()}, {"drives", drives}};
 }
@@ -108,7 +180,7 @@ Window::Window(bool demo, bool demoWarning, int initialTab)
     : m_demo(demo), m_demoWarning(demoWarning), m_settings(demo ? "M45SoftwarePreview" : "M45Software", "m45-drive-watcher") {
     setWindowTitle(demo ? "M45 Drive Watcher — Preview" : "M45 Drive Watcher");
     setWindowIcon(statusIcon(false));
-    resize(1040, 820);
+    resize(960, 860);
     m_statePath = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/state.json";
     if (!demo) {
         // Copy legacy user data once, without overwriting a new installation's data.
@@ -164,27 +236,99 @@ Window::Window(bool demo, bool demoWarning, int initialTab)
     auto *ov = new QVBoxLayout(overview);
     auto *splitter = new QSplitter(Qt::Vertical);
     splitter->setChildrenCollapsible(false);
-    m_drives = new QTableWidget(0, 6);
+    m_drives = new QTableWidget(0, 5);
     m_drives->setObjectName("driveTable");
-    m_drives->setHorizontalHeaderLabels({"Drive", "Device", "Temperature", "Endurance used", "Spare", "Status"});
+    m_drives->setHorizontalHeaderLabels({"Label", "Drive", "Status", "Temperature", "Connection"});
     m_drives->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_drives->setSelectionMode(QAbstractItemView::SingleSelection);
     m_drives->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_drives->verticalHeader()->hide();
     m_drives->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_drives->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_drives->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_drives->setAlternatingRowColors(true);
+    m_drives->setStyleSheet("QTableWidget::item { padding-left: 8px; padding-right: 8px; }");
+    m_drives->setShowGrid(false);
+    m_drives->setWordWrap(false);
+    m_drives->verticalHeader()->setDefaultSectionSize(42);
+    m_drives->setMinimumHeight(210);
     splitter->addWidget(m_drives);
+    auto *driveDetails = new QTabWidget;
+    driveDetails->setObjectName("driveDetails");
+    auto *summary = new QWidget;
+    auto *summaryLayout = new QVBoxLayout(summary);
+    summaryLayout->setContentsMargins(16, 14, 16, 14);
+    m_detailName = new QLabel;
+    m_detailName->setTextFormat(Qt::PlainText); m_detailName->setWordWrap(true);
+    auto detailFont = m_detailName->font(); detailFont.setPointSize(17); detailFont.setBold(true);
+    m_detailName->setFont(detailFont);
+    summaryLayout->addWidget(m_detailName);
+    m_detailModel = new QLabel; m_detailModel->setTextFormat(Qt::PlainText); m_detailModel->setWordWrap(true);
+    summaryLayout->addWidget(m_detailModel);
+    auto *metrics = new QGridLayout;
+    metrics->setHorizontalSpacing(30); metrics->setVerticalSpacing(18);
+    const QStringList headings{"Status", "Temperature", "Monitoring", "Capacity", "Connection", "Connection speed"};
+    for (int i = 0; i < headings.size(); ++i) {
+        auto *cell = new QWidget;
+        auto *cellLayout = new QVBoxLayout(cell); cellLayout->setContentsMargins(0, 0, 0, 0); cellLayout->setSpacing(4);
+        auto *caption = new QLabel(headings[i]);
+        auto captionFont = caption->font(); captionFont.setPointSizeF(captionFont.pointSizeF() * 0.9); caption->setFont(captionFont);
+        cellLayout->addWidget(caption);
+        auto *value = new QLabel;
+        value->setObjectName("summary" + QString(headings[i]).remove(' '));
+        value->setTextFormat(Qt::PlainText); value->setWordWrap(true);
+        auto valueFont = value->font(); valueFont.setBold(true); value->setFont(valueFont);
+        cellLayout->addWidget(value);
+        m_summaryFields[headings[i]] = value;
+        metrics->addWidget(cell, i / 3, i % 3);
+        metrics->setColumnStretch(i % 3, 1);
+    }
+    summaryLayout->addSpacing(10);
+    summaryLayout->addLayout(metrics);
+    m_detailMessage = new QLabel;
+    m_detailMessage->setObjectName("driveSummaryMessage");
+    m_detailMessage->setTextFormat(Qt::PlainText); m_detailMessage->setWordWrap(true);
+    summaryLayout->addSpacing(8); summaryLayout->addWidget(m_detailMessage); summaryLayout->addStretch();
+    driveDetails->addTab(summary, "Summary");
+    auto *technicalScroll = new QScrollArea;
+    technicalScroll->setWidgetResizable(true); technicalScroll->setFrameShape(QFrame::NoFrame);
+    auto *technical = new QWidget;
+    auto *technicalLayout = new QVBoxLayout(technical);
+    technicalLayout->setContentsMargins(16, 14, 16, 14);
+    auto *identity = new QFormLayout;
+    for (const auto &heading : {"Device", "Serial number", "Protocol", "Power-on hours", "Endurance used", "Available spare"}) {
+        auto *value = new QLabel;
+        value->setTextFormat(Qt::PlainText); value->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        identity->addRow(heading, value); m_technicalFields[heading] = value;
+    }
+    technicalLayout->addLayout(identity);
+    auto addTable = [technicalLayout](const QString &title, const QStringList &columns) {
+        auto *group = new QGroupBox(title);
+        auto *layout = new QVBoxLayout(group);
+        auto *table = new QTableWidget(0, columns.size());
+        table->setHorizontalHeaderLabels(columns); table->verticalHeader()->hide(); table->setShowGrid(false);
+        table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        table->setMinimumHeight(110); table->setMaximumHeight(180);
+        layout->addWidget(table); technicalLayout->addWidget(group);
+        return table;
+    };
+    m_volumes = addTable("Volumes", {"Label", "Mount location", "Device"}); m_volumes->setObjectName("volumeTable");
+    m_counters = addTable("Health counters", {"Reading", "Value"}); m_counters->setObjectName("counterTable");
+    m_diagnosticsToggle = new QPushButton("Show diagnostics"); m_diagnosticsToggle->setCheckable(true);
+    m_diagnosticsToggle->setObjectName("diagnosticsToggle"); technicalLayout->addWidget(m_diagnosticsToggle, 0, Qt::AlignLeft);
     m_details = new QTextEdit;
-    m_details->setReadOnly(true);
-    m_details->setMinimumHeight(m_details->fontMetrics().lineSpacing() * 12 + 16);
-    splitter->addWidget(m_details);
-    splitter->setSizes({230, 280});
-    splitter->setStretchFactor(0, 1);
-    splitter->setStretchFactor(1, 1);
-    ov->addWidget(splitter);
-    m_ranges = new QLabel;
-    m_ranges->setWordWrap(true); ov->addWidget(m_ranges);
+    m_details->setReadOnly(true); m_details->setMinimumHeight(180); m_details->hide();
+    m_details->setObjectName("diagnosticOutput"); technicalLayout->addWidget(m_details);
+    connect(m_diagnosticsToggle, &QPushButton::toggled, this, [this](bool visible) {
+        m_details->setVisible(visible); m_diagnosticsToggle->setText(visible ? "Hide diagnostics" : "Show diagnostics");
+    });
+    technicalScroll->setWidget(technical); driveDetails->addTab(technicalScroll, "Technical details");
+    if (initialTab == 4) driveDetails->setCurrentIndex(1);
+    splitter->addWidget(driveDetails);
+    splitter->setSizes({380, 230}); splitter->setStretchFactor(0, 3); splitter->setStretchFactor(1, 2);
+    auto *selectionHelp = new QLabel("Check the drives you want to monitor. Select a drive for details.");
+    ov->addWidget(selectionHelp); ov->addWidget(splitter);
     tabs->addTab(overview, "Drives");
     m_history = new QTableWidget(0, 3);
     m_history->setHorizontalHeaderLabels({"Time", "State", "Event"});
@@ -240,6 +384,13 @@ Window::Window(bool demo, bool demoWarning, int initialTab)
     layout->addLayout(buttons);
     setCentralWidget(central);
     connect(m_drives, &QTableWidget::itemSelectionChanged, this, &Window::details);
+    connect(m_drives, &QTableWidget::itemChanged, this, [this](QTableWidgetItem *item) {
+        if (item->column() != 0) return;
+        m_monitor.setMonitored(item->data(Qt::UserRole).toString(), item->checkState() == Qt::Checked);
+        save();
+        // Render after the signal completes so the changed item stays alive.
+        QTimer::singleShot(0, this, &Window::poll);
+    });
     connect(ack, &QPushButton::clicked, this, [this] { m_monitor.acknowledge(); save(); render(); });
     connect(refresh, &QPushButton::clicked, this, &Window::poll);
     connect(hide, &QPushButton::clicked, this, &QWidget::hide);
@@ -287,11 +438,14 @@ Window::Window(bool demo, bool demoWarning, int initialTab)
     m_miniCoverage->setWordWrap(true); m_miniCoverage->setMaximumWidth(360);
     miniLayout->addWidget(m_miniCoverage);
     if (m_demo) miniLayout->addWidget(new QLabel("PREVIEW · Synthetic readings"));
-    m_miniGuide = new QLabel;
-    m_miniGuide->setWordWrap(true);
-    miniLayout->addWidget(m_miniGuide);
     auto *miniAction = new QWidgetAction(menu);
-    miniAction->setDefaultWidget(m_mini);
+    m_miniScroll = new QScrollArea;
+    m_miniScroll->setFrameShape(QFrame::NoFrame);
+    m_miniScroll->setWidgetResizable(true);
+    m_miniScroll->setFixedWidth(540);
+    m_miniScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_miniScroll->setWidget(m_mini);
+    miniAction->setDefaultWidget(m_miniScroll);
     menu->addAction(miniAction);
     menu->addSeparator();
     menu->addAction("Open M45 Drive Watcher", this, &Window::Show);
@@ -379,19 +533,22 @@ void Window::save() {
 
 void Window::render() {
     const bool warn = m_monitor.warning() || m_saveFailed;
-    m_status->setText(warn ? QString("Attention needed · %1 unread alerts").arg(m_monitor.unreadCount())
-                          : "No new health concerns");
-    QString subtitle = m_demo ? "PREVIEW · Synthetic readings. No real monitoring state or settings are changed."
-                              : m_monitor.coverage();
+    const QString quietStatus = m_monitor.coverage() == "No drives selected for monitoring." ? "Monitoring paused"
+        : m_monitor.coverage().contains("unsupported") ? "Some health readings are unavailable" : "No new health concerns";
+    m_status->setText(warn ? (m_monitor.unreadCount() > 0
+        ? QString("Attention needed · %1 unread alerts").arg(m_monitor.unreadCount()) : "Attention needed") : quietStatus);
+    const auto readings = m_monitor.drives();
+    int monitoredCount = 0;
+    for (const auto v : readings) monitoredCount += v.toObject().value("monitored").toBool(true);
+    QString subtitle = m_demo ? "Preview · Sample drives" : QString("%1 of %2 drives monitored").arg(monitoredCount).arg(readings.size());
+    if (!m_monitor.state().value("global").toObject().isEmpty()) subtitle += " · " + m_monitor.coverage();
     const auto stamp = m_monitor.state().value("collected_at").toInteger();
-    if (stamp) subtitle += "  Last collection: " + QDateTime::fromSecsSinceEpoch(stamp).toString("MMM d, HH:mm:ss");
+    if (stamp) subtitle += " · " + relativeUpdate(stamp, QDateTime::currentSecsSinceEpoch());
+    m_subtitle->setToolTip(stamp ? QDateTime::fromSecsSinceEpoch(stamp).toString("yyyy-MM-dd HH:mm:ss t") : QString());
     if (m_saveFailed) subtitle += "  WARNING: Baseline and alert history could not be saved.";
     m_subtitle->setText(subtitle);
     m_warmF->setText(QString("/ %1°F").arg(qRound(policy().warm * 9.0 / 5.0 + 32)));
     m_hotF->setText(QString("/ %1°F").arg(qRound(policy().hot * 9.0 / 5.0 + 32)));
-    m_ranges->setText(QString("Temperature guide · Below %1: below app warning · %1: warning · %2: critical.\n"
-        "Drive limits vary by model. Endurance used: warning at 90%, critical at 100%. Old error counts are baselined.")
-        .arg(temperatureText(policy().warm), temperatureText(policy().hot)));
     m_tray.setIcon(statusIcon(warn));
     m_tray.setToolTip("M45 Drive Watcher — " + m_status->text() + '\n' + m_monitor.coverage());
     QString selected;
@@ -406,34 +563,37 @@ void Window::render() {
         const auto active = r.value("active").toObject();
         bool critical = false;
         for (const auto c : active) critical |= c.toObject().value("level").toString() == "critical";
-        QString status = !r.value("connected").toBool() ? "Disconnected" : (critical ? "Critical" : (!active.isEmpty() ? "Warning" : (d.contains("error") ? "Read pending" : "Stable")));
+        const bool monitored = r.value("monitored").toBool(true);
         bool unread = false;
         for (const auto e : m_monitor.events())
             if (e.toObject().value("drive_id") == r.value("id") && !e.toObject().value("acknowledged").toBool()) unread = true;
-        if (unread && active.isEmpty() && r.value("connected").toBool()) status = "New change";
+        QString status = driveStatus(r, critical, unread);
         if (selected.isEmpty() && !active.isEmpty()) selectedRow = i;
-        QStringList texts{d.value("model").toString(), d.value("device").toString(), d.contains("temperature") ? temperatureText(d.value("temperature").toDouble()) : "—",
-                          field(d, "percentage_used", "%"), field(d, "available_spare", "%"), status};
+        const QString friendly = driveName(d);
+        const QString model = d.value("model").toString();
+        QStringList texts{friendly == model ? "Unlabeled" : friendly, model, status,
+            d.contains("temperature") && !d.contains("error") ? temperatureText(d.value("temperature").toDouble()) : "—",
+            d.value("external").toBool() ? "External USB" : "Internal"};
         for (int col = 0; col < texts.size(); ++col) {
             auto *item = new QTableWidgetItem(texts[col]);
-            if (col == 0) item->setData(Qt::UserRole, r.value("id").toString());
-            if (col == 5) item->setIcon(statusIcon(!active.isEmpty() || unread));
-            if (col == 2 && d.contains("temperature")) {
+            item->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+            if (col == 0) {
+                item->setData(Qt::UserRole, r.value("id").toString());
+                item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+                item->setCheckState(monitored ? Qt::Checked : Qt::Unchecked);
+                item->setToolTip("Monitor this drive. Turning monitoring off acknowledges its existing alerts; history is retained.");
+            }
+            if (col == 1) item->setToolTip(model + " · " + capacity(d));
+            if (col == 2) {
+                if (d.contains("error")) item->setToolTip("SMART unavailable through the current connection.");
+                if (monitored) item->setIcon(d.contains("error") && active.isEmpty() && !unread
+                    ? style()->standardIcon(QStyle::SP_MessageBoxInformation) : statusIcon(!active.isEmpty() || unread));
+                if (critical || !active.isEmpty() || unread) item->setForeground(statColor(critical ? 1.0 : 0.5));
+            }
+            if (col == 3 && d.contains("temperature") && !d.contains("error")) {
                 item->setForeground(statColor(temperatureRisk(d.value("temperature").toDouble(), policy())));
-                item->setToolTip(QString("Configured warning: %1\nConfigured critical: %2\nGreen → amber → red as temperature approaches the limits.\nDevice limits vary by model.")
-                                 .arg(temperatureText(policy().warm), temperatureText(policy().hot)));
+                item->setToolTip(QString("Warning: %1\nCritical: %2").arg(temperatureText(policy().warm), temperatureText(policy().hot)));
             }
-            if (col == 3 && d.contains("percentage_used")) {
-                item->setForeground(statColor(std::max(0.0, (d.value("percentage_used").toDouble() - 70) / 30.0)));
-                item->setToolTip("Manufacturer's estimate of endurance used, not remaining years.\nLower is better. Warning at 90%; critical at 100%.");
-            }
-            if (col == 4 && d.contains("available_spare")) {
-                const double threshold = d.value("spare_threshold").toDouble(10);
-                item->setForeground(statColor((100 - d.value("available_spare").toDouble()) / std::max(1.0, 100 - threshold)));
-                item->setToolTip(QString("Available reserve capacity; higher is better.\nDevice-reported warning threshold: %1%.\nA new decrease also triggers a change alert.").arg(threshold));
-            }
-            if (col == 5) item->setForeground(statColor(critical ? 1.0 : ((!active.isEmpty() || unread) ? 0.5 : 0.0)));
-            if (d.contains("error") && col == 2) { item->setText("Unavailable"); item->setToolTip("Last successful temperature is shown in drive details."); }
             m_drives->setItem(i, col, item);
         }
         if (r.value("id").toString() == selected) selectedRow = i;
@@ -463,6 +623,7 @@ void Window::renderMini() {
     for (const auto v : m_monitor.drives()) {
         auto r = v.toObject(); auto d = r.value("sample").toObject();
         const auto id = r.value("id").toString();
+        if (!r.value("monitored").toBool(true)) continue;
         seen.insert(id);
         if (!m_miniRows.contains(id)) {
             MiniDriveRow row;
@@ -478,7 +639,9 @@ void Window::renderMini() {
             auto modelFont = row.model->font(); modelFont.setBold(true); row.model->setFont(modelFont);
             texts->addWidget(row.model);
             row.detail = new QLabel;
-            row.detail->setTextFormat(Qt::PlainText); texts->addWidget(row.detail);
+            row.detail->setTextFormat(Qt::PlainText);
+            row.detail->setWordWrap(true); row.detail->setMaximumWidth(300);
+            texts->addWidget(row.detail);
             line->addWidget(labels, 1);
             row.temperature = new QLabel;
             auto tempFont = row.temperature->font(); tempFont.setBold(true); tempFont.setPointSize(12); row.temperature->setFont(tempFont);
@@ -497,11 +660,16 @@ void Window::renderMini() {
         bool critical = false;
         for (const auto c : conditions) critical |= c.toObject().value("level").toString() == "critical";
         const bool disconnected = !r.value("connected").toBool();
-        row.icon->setPixmap(statusIcon(active || unread).pixmap(24, 24));
-        row.model->setText(d.value("model").toString());
-        QString state = disconnected ? "Disconnected" : (critical ? "Critical warning" : (active ? "Active warning" : (unread ? "New health change" : (d.contains("error") ? "Read pending" : "Stable"))));
-        row.detail->setText(d.value("device").toString() + " · " + state);
-        colorLabel(row.detail, critical ? 1.0 : ((active || unread) ? 0.5 : 0.0));
+        row.icon->setPixmap((d.contains("error") && !active && !unread
+            ? style()->standardIcon(QStyle::SP_MessageBoxInformation) : statusIcon(active || unread)).pixmap(24, 24));
+        row.model->setText(driveName(d));
+        row.model->setWordWrap(true);
+        row.model->setMaximumWidth(320);
+        QString state = driveStatus(r, critical, unread);
+        row.detail->setText(state + (d.value("external").toBool() ? " · External USB" : ""));
+        row.model->setToolTip(d.value("model").toString());
+        row.detail->setPalette(qApp->palette());
+        if (!d.contains("error") || active || unread) colorLabel(row.detail, critical ? 1.0 : ((active || unread) ? 0.5 : 0.0));
         row.temperature->setText(d.contains("error") || disconnected || !d.contains("temperature") ? "—" : temperatureText(d.value("temperature").toDouble()));
         row.temperature->setPalette(qApp->palette());
         if (!d.contains("error") && !disconnected && d.contains("temperature"))
@@ -515,11 +683,11 @@ void Window::renderMini() {
         it = m_miniRows.erase(it);
     }
     m_miniCoverage->setText(m_subtitle->text());
+    m_miniCoverage->setToolTip(m_subtitle->toolTip());
     m_miniCoverage->setVisible(m_monitor.drives().isEmpty() || !m_monitor.state().value("global").toObject().isEmpty() || m_saveFailed);
-    m_miniGuide->setText(QString("Warning %1 · Critical %2").arg(temperatureText(policy().warm), temperatureText(policy().hot)));
     m_mini->updateGeometry();
     m_mini->update();
-    if (!m_popup->isVisible()) m_mini->adjustSize();
+    m_miniScroll->setFixedHeight(std::min(480, m_mini->sizeHint().height() + 4));
 }
 
 QWidget *Window::trayPopup() const { return m_popup; }
@@ -533,26 +701,69 @@ void Window::showTrayPopup() {
 
 void Window::details() {
     const int row = m_drives->currentRow();
-    if (row < 0 || !m_drives->item(row, 0)) { m_details->setPlainText("Waiting for drive readings."); return; }
+    if (row < 0 || !m_drives->item(row, 0)) {
+        m_detailName->setText("Select a drive"); m_detailModel->clear(); m_detailMessage->clear();
+        for (auto *value : m_summaryFields) value->setText("—");
+        for (auto *value : m_technicalFields) value->setText("—");
+        m_volumes->setRowCount(0); m_counters->setRowCount(0); m_details->clear(); return;
+    }
     const auto id = m_drives->item(row, 0)->data(Qt::UserRole).toString();
     for (const auto v : m_monitor.drives()) {
-        auto r = v.toObject(); if (r.value("id").toString() != id) continue;
-        auto d = r.value("sample").toObject();
-        QStringList lines{d.value("model").toString() + " · " + d.value("device").toString(),
-                          "Serial: " + field(d, "serial") + "   Protocol: " + field(d, "protocol"),
-                          "Power-on hours: " + field(d, "power_on_hours"),
-                          "Temperature: " + (d.contains("temperature") ? temperatureText(d.value("temperature").toDouble()) : "Unavailable")};
+        const auto r = v.toObject(); if (r.value("id").toString() != id) continue;
+        const auto d = r.value("sample").toObject();
         const auto active = r.value("active").toObject();
-        for (auto it = active.begin(); it != active.end(); ++it) lines << "WARNING: " + it.value().toObject().value("message").toString();
-        if (d.contains("error") && !active.contains("read"))
-            lines << "SMART read unavailable; waiting for 30 minutes of failed checks before alerting. Last successful values are retained below."
-                  << d.value("error").toString();
-        if (active.isEmpty() && !d.contains("error")) lines << "No active warning conditions. Historical counts below are retained as the comparison baseline.";
-        auto counters = d.value("counters").toObject();
-        for (auto it = counters.begin(); it != counters.end(); ++it)
-            lines << QString(it.key()).replace('_', ' ') + ": " + it.value().toString();
-        for (const auto note : d.value("notes").toArray()) lines << note.toString();
-        m_details->setPlainText(lines.join('\n'));
+        bool critical = false, unread = false;
+        for (const auto c : active) critical |= c.toObject().value("level").toString() == "critical";
+        for (const auto e : m_monitor.events())
+            unread |= e.toObject().value("drive_id") == r.value("id") && !e.toObject().value("acknowledged").toBool();
+        m_detailName->setText(driveName(d));
+        m_detailModel->setText(driveName(d) == d.value("model").toString() ? "" : d.value("model").toString());
+        m_summaryFields["Status"]->setText(driveStatus(r, critical, unread));
+        m_summaryFields["Temperature"]->setText(!d.contains("error") && d.contains("temperature")
+            ? temperatureText(d.value("temperature").toDouble()) : "Unavailable");
+        m_summaryFields["Monitoring"]->setText(r.value("monitored").toBool(true) ? "On" : "Off");
+        m_summaryFields["Capacity"]->setText(capacity(d));
+        m_summaryFields["Connection"]->setText(connectionType(d));
+        m_summaryFields["Connection speed"]->setText(r.value("connected").toBool()
+            ? d.value("connection_speed").toString("Unavailable") : "Unavailable");
+        m_summaryFields["Connection speed"]->setToolTip("Negotiated connection speed, not measured file-transfer speed.");
+        QStringList message;
+        if (!r.value("connected").toBool()) message << "This drive is disconnected.";
+        else if (d.contains("error")) message << (d.value("external").toBool()
+            ? "SMART monitoring is unavailable through this USB connection. Drive health cannot be assessed."
+            : "Health readings are unavailable. See Technical details for the last readings and diagnostics.");
+        else if (active.isEmpty()) message << (r.value("monitored").toBool(true)
+            ? "No new health concerns detected." : "Monitoring is off for this drive.");
+        for (const auto c : active) message << c.toObject().value("message").toString();
+        m_detailMessage->setText(message.join("\n"));
+        m_technicalFields["Device"]->setText(field(d, "device"));
+        m_technicalFields["Serial number"]->setText(field(d, "serial"));
+        m_technicalFields["Protocol"]->setText(field(d, "protocol"));
+        m_technicalFields["Power-on hours"]->setText(field(d, "power_on_hours"));
+        m_technicalFields["Endurance used"]->setText(field(d, "percentage_used", "%"));
+        m_technicalFields["Available spare"]->setText(field(d, "available_spare", "%"));
+        QJsonArray partitions = d.value("partitions").toArray();
+        if (!d.value("label").toString().isEmpty() || !d.value("mountpoints").toArray().isEmpty()) partitions.prepend(d);
+        m_volumes->setRowCount(partitions.size());
+        for (int i = 0; i < partitions.size(); ++i) {
+            const auto part = partitions[i].toObject();
+            QStringList mounts; for (const auto m : part.value("mountpoints").toArray()) mounts << m.toString();
+            const QStringList cells{field(part, "label"), mounts.isEmpty() ? "—" : mounts.join(", "), field(part, "device")};
+            for (int col = 0; col < cells.size(); ++col) {
+                auto *item = new QTableWidgetItem(cells[col]); item->setToolTip(cells[col]); m_volumes->setItem(i, col, item);
+            }
+        }
+        const auto counters = d.value("counters").toObject();
+        m_counters->setRowCount(counters.size()); int counterRow = 0;
+        for (auto it = counters.begin(); it != counters.end(); ++it, ++counterRow) {
+            m_counters->setItem(counterRow, 0, new QTableWidgetItem(QString(it.key()).replace('_', ' ')));
+            m_counters->setItem(counterRow, 1, new QTableWidgetItem(it.value().toString()));
+        }
+        QStringList diagnostics;
+        if (d.contains("error")) diagnostics << d.value("error").toString();
+        if (!d.value("diagnostics").toString().isEmpty()) diagnostics << d.value("diagnostics").toString();
+        for (const auto note : d.value("notes").toArray()) diagnostics << note.toString();
+        m_details->setPlainText(diagnostics.isEmpty() ? "No diagnostic messages." : diagnostics.join("\n\n"));
         return;
     }
 }

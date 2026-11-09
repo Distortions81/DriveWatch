@@ -24,12 +24,12 @@ int main(int argc, char **argv) {
     args.addOption({"show", "Open the drive overview on launch."});
     args.addOption({"demo", "Preview with synthetic data; never change real monitoring state or settings."});
     args.addOption({"demo-warning", "Show synthetic warning conditions (requires --demo)."});
-    args.addOption({"page", "Initial page: drives, history, settings, tray.", "page", "drives"});
+    args.addOption({"page", "Initial page: drives, history, settings, tray, technical.", "page", "drives"});
     args.addOption({"screenshot", "Save a dark-themed demo screenshot and exit (requires --demo).", "file"});
     args.process(app);
     const bool demo = args.isSet("demo");
     if ((args.isSet("screenshot") || args.isSet("demo-warning")) && !demo) args.showHelp(2);
-    const int page = QStringList{"drives", "history", "settings", "tray"}.indexOf(args.value("page"));
+    const int page = QStringList{"drives", "history", "settings", "tray", "technical"}.indexOf(args.value("page"));
     if (page < 0) args.showHelp(2);
     auto bus = QDBusConnection::sessionBus();
     if (!demo) {

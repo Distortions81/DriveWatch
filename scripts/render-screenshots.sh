@@ -11,3 +11,5 @@ export QT_QPA_PLATFORM=offscreen
 "$binary" --demo --page settings --screenshot docs/screenshots/settings.png
 "$binary" --demo --page tray --screenshot docs/screenshots/tray.png
 "$binary" --demo --demo-warning --page tray --screenshot docs/screenshots/tray-warning.png
+
+"$binary" --demo --page technical --screenshot docs/screenshots/technical.png

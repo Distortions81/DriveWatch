@@ -55,7 +55,7 @@ class CollectorTests(unittest.TestCase):
 
     def run_with(self, data, status):
         def runner(argv, **kwargs):
-            self.assertEqual(argv, [c.SMARTCTL, '-x', '-j', '/dev/nvme0'])
+            self.assertEqual(argv, [c.SMARTCTL, '-x', '--json=o', '/dev/nvme0'])
             self.assertNotIn('shell', kwargs)
             self.assertEqual(kwargs['timeout'], 90)
             return subprocess.CompletedProcess(argv, status, json.dumps(data))
@@ -80,6 +80,22 @@ class CollectorTests(unittest.TestCase):
         self.assertIn('error', result)
         self.assertEqual(result['device'], '/dev/nvme0')
 
+    def test_real_smartctl_accepts_collector_json_option(self):
+        if not Path(c.SMARTCTL).exists():
+            self.skipTest('smartctl is not installed')
+        # The device is intentionally nonexistent: exercise option parsing without drive IO.
+        result = c.collect_one('/dev/m45-drive-watcher-test-nonexistent', '/sys/nonexistent')
+        self.assertNotIn('UNRECOGNIZED OPTION', result['error'])
+        self.assertIn('smartctl', result.get('diagnostics', ''))
+        self.assertIn('m45-drive-watcher-test-nonexistent', result['error'])
+
+    def test_identity_failure_keeps_actual_diagnostic(self):
+        output = ['smartctl 7.4', 'Read Device Identity failed: scsi error unsupported field in scsi command']
+        result = self.run_with({'smartctl': {'exit_status': 2, 'output': output}}, 2)
+        self.assertIn('unsupported field', result['error'])
+        self.assertIn('Read Device Identity failed', result['diagnostics'])
+        self.assertEqual(result['smart_support'], 'unavailable')
+
     def test_timeout_and_malformed_output(self):
         def timeout(*args, **kwargs):
             self.assertEqual(kwargs['timeout'], 90)
@@ -95,6 +111,89 @@ class CollectorTests(unittest.TestCase):
             for name in ['sda', 'sda1', 'nvme0n1', 'nvme0n2', 'nvme0n1p1', 'loop0', 'dm-0', 'mmcblk0']:
                 (root / name).mkdir()
             self.assertEqual([d[0] for d in c.discover(root)], ['/dev/mmcblk0', '/dev/nvme0n1', '/dev/sda'])
+
+    def test_system_names_and_partition_labels_survive_smart_failure(self):
+        payload = {'blockdevices': [{'path': '/dev/sdb', 'model': 'Expansion SW',
+            'serial': 'USB123', 'tran': 'usb', 'size': 8000000000000,
+            'children': [{'path': '/dev/sdb1', 'label': 'Backups',
+                          'mountpoints': ['/media/Backups', None]}]}]}
+        def lsblk(argv, **kwargs):
+            return subprocess.CompletedProcess(argv, 0, json.dumps(payload))
+        metadata = c.system_metadata(lsblk)['/dev/sdb']
+        def failed(argv, **kwargs):
+            return subprocess.CompletedProcess(argv, 2, '{"smartctl":{"exit_status":2}}')
+        result = c.collect_one('/dev/sdb', '/sys/usb1/test', failed, metadata)
+        self.assertEqual(result['model'], 'Expansion SW')
+        self.assertEqual(result['serial'], 'USB123')
+        self.assertTrue(result['external'])
+        self.assertEqual(result['partitions'][0]['label'], 'Backups')
+        self.assertEqual(result['partitions'][0]['mountpoints'], ['/media/Backups'])
+        self.assertEqual(result['smart_support'], 'unavailable')
+        def timed_out(*args, **kwargs):
+            raise subprocess.TimeoutExpired('smartctl', 90)
+        timeout = c.collect_one('/dev/sdb', '/sys/usb1/test', timed_out, metadata)
+        self.assertEqual(timeout['id'], result['id'])
+        self.assertEqual(timeout['model'], 'Expansion SW')
+        moved = c.collect_one('/dev/sdd', '/sys/usb2/test', failed, metadata)
+        self.assertEqual(moved['id'], result['id'])
+
+    def test_unsupported_differs_from_unavailable(self):
+        result = c.normalize({'smart_support': {'available': False}}, '/dev/sdb', '/sys/a')
+        self.assertEqual(result['smart_support'], 'unsupported')
+        self.assertNotIn('passed', result)
+        self.assertEqual(c.normalize({}, '/dev/sdb', '/sys/a')['smart_support'], 'unavailable')
+
+    def test_metadata_failure_does_not_stop_smart(self):
+        def failed(*args, **kwargs):
+            raise subprocess.TimeoutExpired('lsblk', 10)
+        self.assertEqual(c.system_metadata(failed), {})
+        self.assertTrue(c.normalize(self.nvme(), '/dev/nvme0', '/sys/a', {})['passed'])
+
+    def test_usb_speed_uses_nearest_device_not_hub(self):
+        with tempfile.TemporaryDirectory() as directory:
+            hub = Path(directory) / 'usb2/hub'
+            disk = hub / 'disk'
+            leaf = disk / 'block/sdb'
+            leaf.mkdir(parents=True)
+            for path, speed in [(hub, '10000'), (disk, '5000')]:
+                (path / 'idVendor').write_text('0bc2')
+                (path / 'speed').write_text(speed)
+            self.assertEqual(c.link_metadata(str(leaf), 'usb')['connection_speed'], '5 Gb/s')
+            (disk / 'speed').unlink()
+            self.assertNotIn('connection_speed', c.link_metadata(str(leaf), 'usb'))
+
+    def test_nvme_link_uses_endpoint_not_upstream_port(self):
+        with tempfile.TemporaryDirectory() as directory:
+            upstream = Path(directory) / '0000:00:01.0'
+            endpoint = upstream / '0000:04:00.0'
+            leaf = endpoint / 'nvme/nvme0/nvme0n1'
+            leaf.mkdir(parents=True)
+            for path, speed, width in [(upstream, '16.0 GT/s PCIe', '8'), (endpoint, '8.0 GT/s PCIe', '4')]:
+                (path / 'current_link_speed').write_text(speed)
+                (path / 'current_link_width').write_text(width)
+            self.assertEqual(c.link_metadata(str(leaf), 'nvme')['connection_speed'], 'PCIe 8.0 GT/s ×4')
+            (endpoint / 'current_link_width').unlink()
+            self.assertNotIn('connection_speed', c.link_metadata(str(leaf), 'nvme'))
+            self.assertNotIn('connection_speed', c.link_metadata(str(leaf), 'sas'))
+
+    def test_current_sata_speed_does_not_replace_usb_link_speed(self):
+        data = {'interface_speed': {'max': {'string': '6.0 Gb/s'}, 'current': {'string': '3.0 Gb/s'}}}
+        result = c.normalize(data, '/dev/sda', '/sys/a', {'transport': 'sata', 'connection_speed': '6.0 Gb/s'})
+        self.assertEqual(result['connection_speed'], '3.0 Gb/s')
+        result = c.normalize(data, '/dev/sdb', '/sys/a', {'transport': 'usb', 'connection_speed': '5 Gb/s'})
+        self.assertEqual(result['connection_speed'], '5 Gb/s')
+
+    def test_sata_speed_reads_its_port(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ata = Path(directory) / 'ata1'
+            leaf = ata / 'host0/block/sda'
+            leaf.mkdir(parents=True)
+            speed = ata / 'link1/ata_link/link1/sata_spd'
+            speed.parent.mkdir(parents=True)
+            speed.write_text('6.0 Gbps')
+            self.assertEqual(c.link_metadata(str(leaf))['connection_speed'], '6.0 Gb/s')
+            speed.write_text('<unknown>')
+            self.assertNotIn('connection_speed', c.link_metadata(str(leaf)))
 
     def test_atomic_snapshot(self):
         with tempfile.TemporaryDirectory() as path:

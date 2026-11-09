@@ -11,6 +11,8 @@ class QSpinBox;
 class QCheckBox;
 class QMenu;
 class QTabWidget;
+class QScrollArea;
+class QPushButton;
 
 class Window : public QMainWindow {
     Q_OBJECT
@@ -35,7 +37,14 @@ private:
     QSystemTrayIcon m_tray;
     QLabel *m_status;
     QLabel *m_subtitle;
-    QLabel *m_ranges;
+    QLabel *m_detailName;
+    QLabel *m_detailModel;
+    QLabel *m_detailMessage;
+    QMap<QString, QLabel *> m_summaryFields;
+    QMap<QString, QLabel *> m_technicalFields;
+    QTableWidget *m_volumes;
+    QTableWidget *m_counters;
+    QPushButton *m_diagnosticsToggle;
     QTableWidget *m_drives;
     QTableWidget *m_history;
     QTextEdit *m_details;
@@ -47,6 +56,7 @@ private:
     QCheckBox *m_notifications;
     QMenu *m_popup;
     QWidget *m_mini;
+    QScrollArea *m_miniScroll;
     struct MiniDriveRow {
         QWidget *widget;
         QLabel *icon;
@@ -57,7 +67,6 @@ private:
     QMap<QString, MiniDriveRow> m_miniRows;
     QLabel *m_miniSummary;
     QLabel *m_miniCoverage;
-    QLabel *m_miniGuide;
     QTabWidget *m_tabs;
     Policy policy() const;
     void render();

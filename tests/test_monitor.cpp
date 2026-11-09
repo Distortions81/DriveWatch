@@ -18,6 +18,85 @@ QJsonObject frame(QJsonObject d = drive(), qint64 time = now) {
 class Tests : public QObject {
     Q_OBJECT
 private slots:
+    void uncheckedDrivePersistsAndStopsAllItsAlerts() {
+        Monitor m;
+        m.update(frame(drive("1", 80)), now);
+        QVERIFY(m.warning());
+        m.setMonitored("serial-970", false);
+        QVERIFY(!m.warning());
+        QCOMPARE(m.unreadCount(), 0);
+        QVERIFY(!m.events().isEmpty());
+        auto restored = Monitor(QJsonDocument::fromJson(QJsonDocument(m.state()).toJson()).object());
+        auto failed = drive("2", 90); failed["passed"] = false;
+        QVERIFY(restored.update(frame(failed, now + 60), now + 60).isEmpty());
+        auto empty = frame(); empty["drives"] = QJsonArray(); empty["collected_at"] = now + 120;
+        QVERIFY(restored.update(empty, now + 120).isEmpty());
+        QVERIFY(!restored.warning());
+        QVERIFY(restored.unavailable("Collector unavailable", now + 180).isEmpty());
+        restored.setMonitored("serial-970", true);
+        QVERIFY(restored.update(frame(drive("999"), now + 240), now + 240).isEmpty());
+        QVERIFY(!restored.warning());
+        auto hot = drive("999", 80);
+        restored.update(frame(hot, now + 300), now + 300);
+        QVERIFY(restored.warning());
+        QCOMPARE(restored.unreadCount(), 1);
+    }
+    void confirmedUnsupportedDoesNotProduceHealthAlerts() {
+        Monitor m;
+        auto d = drive(); d.remove("passed"); d.remove("temperature");
+        d["smart_support"] = "unsupported"; d["error"] = "No SMART support";
+        for (int i = 0; i < 40; ++i)
+            QVERIFY(m.update(frame(d, now + i * 60), now + i * 60).isEmpty());
+        QVERIFY(!m.warning());
+        QCOMPARE(m.coverage(), QString("No drives selected for monitoring."));
+    }
+    void externalDrivesSortLastAndSelectionSurvivesIdentityRecovery() {
+        Monitor m;
+        auto usb = drive(); usb["id"] = "usb"; usb["device"] = "/dev/sdb";
+        usb["model"] = "Unknown drive"; usb["external"] = true; usb["error"] = "Cannot open";
+        auto f = frame(); f["drives"] = QJsonArray{usb, drive()};
+        m.update(f, now);
+        QCOMPARE(m.drives().last().toObject().value("id").toString(), QString("usb"));
+        m.setMonitored("usb", false);
+        usb["id"] = "real-usb"; usb["model"] = "Expansion"; usb["system_id"] = "usbserial";
+        f["drives"] = QJsonArray{usb, drive()}; f["collected_at"] = now + 60;
+        m.update(f, now + 60);
+        QCOMPARE(m.drives().size(), 2);
+        QVERIFY(!m.drives().last().toObject().value("monitored").toBool(true));
+        usb["id"] = "smart-usb"; usb["device"] = "/dev/sdd"; usb.remove("error");
+        f["drives"] = QJsonArray{usb, drive()}; f["collected_at"] = now + 120;
+        m.update(f, now + 120);
+        QCOMPARE(m.drives().size(), 2);
+        QVERIFY(!m.drives().last().toObject().value("monitored").toBool(true));
+    }
+    void failedSmartRefreshesLegacyUnknownNameAndLabels() {
+        Monitor m;
+        auto d = drive(); d["model"] = "Unknown drive"; d["error"] = "Cannot open";
+        m.update(frame(d), now);
+        d["model"] = "Expansion SW"; d["external"] = true; d["smart_support"] = "unsupported";
+        d["partitions"] = QJsonArray{QJsonObject{{"label", "Comedy 3"}}};
+        m.update(frame(d, now + 60), now + 60);
+        const auto sample = m.drives().first().toObject().value("sample").toObject();
+        QCOMPARE(sample.value("model").toString(), QString("Expansion SW"));
+        QVERIFY(sample.value("external").toBool());
+        QCOMPARE(sample.value("smart_support").toString(), QString("unsupported"));
+        QCOMPARE(sample.value("partitions").toArray().first().toObject().value("label").toString(), QString("Comedy 3"));
+    }
+    void unsupportedDefaultsOffButExplicitChoicesPersist() {
+        Monitor m;
+        auto usb = drive(); usb["external"] = true; usb["error"] = "USB SMART unavailable";
+        m.update(frame(usb), now);
+        QVERIFY(!m.drives().first().toObject().value("monitored").toBool(true));
+        QVERIFY(!m.warning());
+        m.setMonitored("serial-970", true);
+        Monitor restored(m.state());
+        restored.update(frame(usb, now + 60), now + 60);
+        QVERIFY(restored.drives().first().toObject().value("monitored").toBool());
+        Monitor internal;
+        usb["external"] = false;
+        internal.update(frame(usb), now);
+        QVERIFY(internal.drives().first().toObject().value("monitored").toBool());
+    }
     void historicalCountsAreBaseline() {
         Monitor m;
         QVERIFY(m.update(frame(), now).isEmpty());

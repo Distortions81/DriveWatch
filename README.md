@@ -17,6 +17,11 @@ Screenshots show synthetic data using a consistent dark theme. Fonts and colors 
 - Lifetime media errors and old thermal events are recorded as the initial baseline. Generic NVMe command error counts and unsafe shutdowns are visible, but do not independently trigger alerts.
 - Warning icon remains until changes are acknowledged. Active faults remain visible even after acknowledgement.
 - SMART read failures warn after 30 minutes of consecutive failed checks; a successful read resets the period. Missing drives, missing temperatures, invalid collector output, and stale readings remain explicit warnings.
+- Summary shows the connection interface (NVMe, SATA, USB and other reported types) and negotiated link speed when available. These are connection rates, not measured file-transfer speeds. Missing speed data remains unavailable.
+- The overview puts filesystem labels first, with drive models in a separate column, followed by status, temperature and connection. Alternating row backgrounds and additional padding separate each drive. Select a drive for a formatted Summary; device paths, mount locations, serials, counters and expandable diagnostics are in Technical details.
+- Unsupported drives and USB drives whose SMART data cannot be read default to monitoring off. Explicit checkbox choices are preserved across refreshes and upgrades.
+- Checkboxes choose which drives to monitor; choices survive restarts. Unchecked drives remain in the overview, without health, read-failure, or disconnection alerts, and are omitted from the tray popup. Existing alerts for that drive are acknowledged and retained in history. Re-enabling starts a fresh comparison baseline; current health faults still apply. The shared collector continues polling all drives.
+- Device names, capacity, USB connections, partition labels, and mount locations come from system metadata even when SMART fails. External USB drives sort below internal drives.
 - Login autostart enabled after installation, with a per-user toggle in Settings.
 - No database, web server, Python packages, or KDE Frameworks dependencies.
 
@@ -25,7 +30,7 @@ Screenshots show synthetic data using a consistent dark theme. Fonts and colors 
 Build a package as below, then install it on a machine running systemd and a desktop session:
 
 ```sh
-sudo apt install ./build/m45-drive-watcher_0.1.4_amd64.deb
+sudo apt install ./build/m45-drive-watcher_0.1.11_amd64.deb
 m45-drive-watcher --show
 ```
 
@@ -60,9 +65,9 @@ The demo does not change real settings, baselines, autostart preferences, or sen
 
 ## How monitoring works
 
-`m45-drive-watcher-collector.timer` runs the root-owned, fixed-command collector once per minute. It discovers physical SATA/SAS/SCSI, NVMe namespaces, and MMC block devices from sysfs and runs `smartctl -x -j` with a 90-second timeout per drive. Unsupported hardware is shown as unreadable. Device-mapper/RAID virtual volumes, loop devices, and partitions are excluded. Hardware behind RAID bridges may require extra smartctl support and is not automatically enumerated behind controllers.
+`m45-drive-watcher-collector.timer` runs the root-owned, fixed-command collector once per minute. It discovers physical SATA/SAS/SCSI, NVMe namespaces, and MMC block devices from sysfs and runs `smartctl -x --json=o` with a 90-second timeout per drive. Devices explicitly reporting no SMART support show **No SMART support**, without repeated read-failure alerts. Failed queries show **SMART unavailable** and retain the 30-minute alert policy; a USB connection alone does not prove a drive lacks SMART. Neither state is a healthy-drive assessment. Failed queries retain the original SMART diagnostic output so USB command errors are visible. A bounded, read-only `lsblk` query supplies model/serial fallback, USB transport, capacity, filesystem labels and mount locations without mounting anything; sysfs supplies a further model/transport fallback. Device-mapper/RAID virtual volumes, loop devices, and partitions are excluded. Hardware behind RAID bridges may require extra smartctl support and is not automatically enumerated behind controllers.
 
-The collector accepts no user commands or arguments and performs no repairs, formats, self-tests, firmware changes, or SMART enable/disable operations. It atomically writes `/run/m45-drive-watcher/snapshot.json`. This file is readable by local users and includes drive serial numbers. The systemd service limits privileges and writes to its runtime directory; the desktop app never runs as root and does not launch privileged processes.
+The collector accepts no user commands or arguments and performs no repairs, formats, self-tests, firmware changes, or SMART enable/disable operations. It atomically writes `/run/m45-drive-watcher/snapshot.json`. This file is readable by local users and includes drive serial numbers, filesystem labels, and mount paths. The systemd service limits privileges and writes to its runtime directory; the desktop app never runs as root and does not launch privileged processes.
 
 The desktop app reads the snapshot every 10 seconds. Data older than five minutes is a monitoring warning. Baselines, unread alerts, notification cooldowns, and up to 500 history entries persist in the user's XDG application data directory (normally `~/.local/share/M45Software/m45-drive-watcher/state.json`). If all 500 entries are unread, older entries are combined into a visible unread summary rather than silently discarded. Settings are normally in `~/.config/M45Software/m45-drive-watcher.conf`.
 
@@ -105,6 +110,7 @@ For SATA drives that report a bogus current temperature of 0°C, M45 Drive Watch
 ![Drive health warning](docs/screenshots/warning.png)
 ![Alert history](docs/screenshots/history.png)
 ![Settings](docs/screenshots/settings.png)
+![Technical details](docs/screenshots/technical.png)
 
 Regenerate dark-mode captures directly from the built app:
 

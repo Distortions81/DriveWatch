@@ -87,6 +87,14 @@ void Monitor::active(QJsonObject &record, const QJsonObject &conditions, qint64 
 
 QStringList Monitor::unavailable(const QString &reason, qint64 now, const Policy &policy) {
     QStringList notices;
+    const auto records = m_state.value("drives").toObject();
+    bool selected = records.isEmpty();
+    for (const auto v : records) selected |= v.toObject().value("monitored").toBool(true);
+    if (!selected) {
+        m_state["global"] = QJsonObject();
+        m_state["coverage"] = "No drives selected for monitoring.";
+        return notices;
+    }
     QJsonObject record = m_state.value("global").toObject();
     record["id"] = "monitor";
     active(record, {{"coverage", condition(reason)}}, now, policy, notices);
@@ -102,13 +110,14 @@ QStringList Monitor::update(const QJsonObject &snapshot, qint64 now, const Polic
     const qint64 collected = snapshot.value("collected_at").toInteger();
     if (collected > now + 60 || now - collected > policy.staleSeconds)
         return unavailable("Drive readings are stale. Check the collector service.", now, policy);
-    if (snapshot.value("drives").toArray().isEmpty())
+    if (snapshot.value("drives").toArray().isEmpty() && m_state.value("drives").toObject().isEmpty())
         return unavailable("No drives were detected. Monitoring coverage is unavailable.", now, policy);
 
     QStringList notices;
     auto records = m_state.value("drives").toObject();
     QSet<QString> seen;
     bool incomplete = false;
+    int selected = 0;
     // Validate the whole frame before changing any baselines.
     for (const auto value : snapshot.value("drives").toArray()) {
         const auto d = value.toObject();
@@ -123,6 +132,16 @@ QStringList Monitor::update(const QJsonObject &snapshot, qint64 now, const Polic
         auto id = d.value("id").toString();
         if (id.isEmpty() || d.value("device").toString().isEmpty())
             return unavailable("Collector returned an invalid drive record.", now, policy);
+        // Recover identity after a previous SMART failure, including renamed devices.
+        if (!records.contains(id)) {
+            for (auto it = records.begin(); it != records.end(); ++it) {
+                auto sample = it.value().toObject().value("sample").toObject();
+                if ((!d.value("system_id").toString().isEmpty() && sample.value("system_id") == d.value("system_id")) ||
+                    (sample.value("model") == "Unknown drive" && sample.value("device") == d.value("device"))) {
+                    id = it.key(); d["id"] = id; break;
+                }
+            }
+        }
         // A timed-out drive may have no serial; associate it with its last known path.
         if (d.contains("error") && !records.contains(id)) {
             for (auto it = records.begin(); it != records.end(); ++it)
@@ -134,15 +153,31 @@ QStringList Monitor::update(const QJsonObject &snapshot, qint64 now, const Polic
         }
         seen.insert(id);
         auto record = records.value(id).toObject();
+        if (!record.contains("monitored")) {
+            const bool unsupported = d.value("smart_support") == "unsupported" ||
+                (d.value("external").toBool() && d.contains("error"));
+            record["monitored"] = !unsupported;
+            if (unsupported) acknowledgeDrive(id);
+        }
         const auto previous = record.value("sample").toObject();
-        const bool baseline = !record.contains("sample");
+        const bool baseline = !record.contains("sample") || record.value("reset_baseline").toBool();
         record["id"] = id;
         record["connected"] = true;
         record["last_seen"] = collected;
+        if (!record.value("monitored").toBool(true)) {
+            record["sample"] = d;
+            record["active"] = QJsonObject();
+            record.remove("read_failure_since");
+            record.remove("read_failure_last");
+            records[id] = record;
+            continue;
+        }
+        ++selected;
+        if (!d.contains("error")) record.remove("reset_baseline");
         QJsonObject conditions;
         const QString label = name(d);
-        if (d.contains("error")) {
-            incomplete = true;
+        if (d.contains("error")) incomplete = true;
+        if (d.contains("error") && d.value("smart_support") != "unsupported") {
             // Use collection times so rereading one snapshot cannot confirm a failure.
             const qint64 lastFailure = record.value("read_failure_last").toInteger();
             qint64 since = record.value("read_failure_since").toInteger(collected);
@@ -241,6 +276,14 @@ QStringList Monitor::update(const QJsonObject &snapshot, qint64 now, const Polic
             record["sample"] = d;
         } else {
             auto retained = previous.isEmpty() ? d : previous;
+            // Keep health counters, while refreshing names/labels even when SMART fails.
+            retained.remove("connection_speed");
+            for (const auto &key : {"transport", "connection_speed", "external", "size_bytes", "partitions", "label", "mountpoints", "system_id", "smart_support", "diagnostics"})
+                if (d.contains(key)) retained[key] = d.value(key);
+            if (retained.value("model").toString().isEmpty() || retained.value("model") == "Unknown drive" ||
+                retained.value("model").toString() == retained.value("device").toString().section('/', -1))
+                retained["model"] = d.value("model");
+            if (retained.value("serial").toString().isEmpty()) retained["serial"] = d.value("serial");
             retained["device"] = d.value("device");
             retained["error"] = d.value("error");
             record["sample"] = retained;
@@ -253,15 +296,41 @@ QStringList Monitor::update(const QJsonObject &snapshot, qint64 now, const Polic
         record["connected"] = false;
         record.remove("read_failure_since");
         record.remove("read_failure_last");
-        active(record, {{"missing", condition(name(record.value("sample").toObject()) + ": drive is no longer detected.")}},
-               now, policy, notices);
+        if (record.value("monitored").toBool(true)) {
+            ++selected;
+            active(record, {{"missing", condition(name(record.value("sample").toObject()) + ": drive is no longer detected.")}},
+                   now, policy, notices);
+        }
         it.value() = record;
     }
     m_state["drives"] = records;
     m_state["collected_at"] = collected;
-    m_state["coverage"] = incomplete ? "Some drives could not be read." : "Monitoring is up to date.";
+    m_state["coverage"] = selected == 0 ? "No drives selected for monitoring." : incomplete ? "Some selected drives have unavailable or unsupported SMART monitoring." : "Monitoring selected drives is up to date.";
     m_state["global"] = QJsonObject();
     return notices;
+}
+
+void Monitor::setMonitored(const QString &id, bool enabled) {
+    auto records = m_state.value("drives").toObject();
+    if (!records.contains(id)) return;
+    auto record = records.value(id).toObject();
+    record["monitored"] = enabled;
+    record["active"] = QJsonObject();
+    record.remove("read_failure_since");
+    record.remove("read_failure_last");
+    record["reset_baseline"] = true;
+    records[id] = record;
+    m_state["drives"] = records;
+    if (!enabled) acknowledgeDrive(id);
+}
+
+void Monitor::acknowledgeDrive(const QString &id) {
+    auto log = events();
+    for (int i = 0; i < log.size(); ++i) {
+        auto e = log[i].toObject();
+        if (e.value("drive_id").toString() == id) { e["acknowledged"] = true; log[i] = e; }
+    }
+    m_state["events"] = log;
 }
 
 void Monitor::acknowledge() {
@@ -299,6 +368,16 @@ bool Monitor::warning() const {
 QJsonArray Monitor::drives() const {
     QJsonArray result;
     const auto records = m_state.value("drives").toObject();
-    for (auto it = records.begin(); it != records.end(); ++it) result.append(it.value());
+    QList<QJsonObject> sorted;
+    for (const auto v : records) sorted.append(v.toObject());
+    std::sort(sorted.begin(), sorted.end(), [](const QJsonObject &a, const QJsonObject &b) {
+        auto rank = [](const QJsonObject &r) {
+            auto d = r.value("sample").toObject();
+            return (d.value("external").toBool() ? 2 : 0) + (d.contains("error") ? 1 : 0);
+        };
+        if (rank(a) != rank(b)) return rank(a) < rank(b);
+        return a.value("sample").toObject().value("device").toString() < b.value("sample").toObject().value("device").toString();
+    });
+    for (const auto &r : sorted) result.append(r);
     return result;
 }
