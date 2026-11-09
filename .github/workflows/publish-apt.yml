@@ -1,0 +1,106 @@
+name: Publish APT repository
+
+on:
+  release:
+    types: [published]
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        required: true
+    secrets:
+      M45_APT_DEPLOY_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published release tag to deploy (for example v0.1.12)
+        type: string
+        required: false
+      check_only:
+        description: Check the restricted deployment connection without publishing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Prepare restricted SSH credential
+        env:
+          M45_APT_DEPLOY_KEY: ${{ secrets.M45_APT_DEPLOY_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$M45_APT_DEPLOY_KEY"
+          umask 077
+          printf '%s\n' "$M45_APT_DEPLOY_KEY" > "$RUNNER_TEMP/m45-apt-key"
+      - name: Check deployment connection
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -T -p 5313 -i "$RUNNER_TEMP/m45-apt-key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile=packaging/apt/ssh_known_hosts \
+            -o ConnectTimeout=20 dist@m45software.com check
+      - name: Download and verify published release
+        id: package
+        if: github.event_name != 'workflow_dispatch' || !inputs.check_only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, re, subprocess, json, hashlib
+          from pathlib import Path
+          tag = os.environ['RELEASE_TAG']
+          match = re.fullmatch(r'v([0-9]+\.[0-9]+\.[0-9]+)', tag)
+          if not match:
+              raise SystemExit('A release tag such as v0.1.12 is required.')
+          version = match[1]
+          release = json.loads(subprocess.check_output(['gh', 'release', 'view', tag, '--json', 'isDraft']))
+          if release['isDraft']:
+              raise SystemExit('Draft releases cannot be published to APT.')
+          filename = f'm45-drive-watcher_{version}_amd64.deb'
+          subprocess.run(['gh', 'release', 'download', tag, '--pattern', filename,
+                          '--pattern', 'SHA256SUMS', '--dir', 'release'], check=True)
+          package = Path('release') / filename
+          actual = hashlib.sha256(package.read_bytes()).hexdigest()
+          sums = (Path('release') / 'SHA256SUMS').read_text().splitlines()
+          expected = [m[1] for line in sums if (m := re.fullmatch(r'([0-9a-f]{64}) [ *]' + re.escape(filename), line))]
+          if expected != [actual]:
+              raise SystemExit('The package does not match the release SHA256SUMS.')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'version={version}\nfile={package}\nsha256={actual}\nsize={package.stat().st_size}\n')
+          PY
+      - name: Publish package and sign APT metadata on server
+        if: github.event_name != 'workflow_dispatch' || !inputs.check_only
+        env:
+          PACKAGE_FILE: ${{ steps.package.outputs.file }}
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+          PACKAGE_SHA256: ${{ steps.package.outputs.sha256 }}
+          PACKAGE_SIZE: ${{ steps.package.outputs.size }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -T -p 5313 -i "$RUNNER_TEMP/m45-apt-key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile=packaging/apt/ssh_known_hosts \
+            -o ConnectTimeout=20 dist@m45software.com \
+            "publish m45-drive-watcher $PACKAGE_VERSION $PACKAGE_SIZE $PACKAGE_SHA256" < "$PACKAGE_FILE"
+      - name: Remove temporary SSH credential
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/m45-apt-key"

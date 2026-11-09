@@ -11,7 +11,21 @@ Public archive: <https://m45software.com/apt/>. Suite: `stable`; component: `mai
 
 The dedicated RSA-3072 signing key has fingerprint `F8BD2FC443473EB71D87003BF8A7E75C58D7C0A3` and expires on **2028-11-08**. It is available for unattended signing to the `dist` account through the private GnuPG directory. Server access and system-backup permissions protect it.
 
-## Publish an update
+## Automatic publication from GitHub Actions
+
+Configured in `.github/workflows/publish-apt.yml`. Published GitHub releases (including the project's preview releases) deploy their matching `m45-drive-watcher_VERSION_amd64.deb` and `SHA256SUMS`. Drafts do not deploy. The workflow checks the checksum before upload; the server independently verifies size, checksum, package name, version and architecture before signing.
+
+The build workflow calls the publisher directly after creating a tested release. This direct call is necessary because events created with GitHub's `GITHUB_TOKEN` do not trigger another release workflow. Manually published releases use the `release: published` event.
+
+The repository Actions secret `M45_APT_DEPLOY_KEY` contains a dedicated SSH credential. Its public key has a `restrict`/forced-command entry in the server's `authorized_keys`, allowing only the fixed receiver at `/home/dist/.local/share/m45-apt/receive-apt-release.py`. It cannot run a shell, use SFTP/SCP, or forward connections. The receiver accepts this project's amd64 packages only, limits uploads to 64 MiB, and cleans up temporary uploads. CI cannot overwrite the receiver or publisher. The archive signing key stays on the server and is never uploaded to GitHub.
+
+`packaging/apt/ssh_known_hosts` pins the already-verified server host key; the workflow requires strict host-key verification. If that key changes, verify it independently before updating the pin.
+
+Use **Actions → Publish APT repository → Run workflow** with **check_only** enabled to test the restricted connection without publishing. To retry a published release, enter its tag (such as `v0.1.12`) and disable **check_only**. Reusing a version with different package bytes is rejected; increment the app version instead.
+
+To rotate the Actions credential, create a fresh dedicated SSH key, add the same restricted entry for its public key, update `M45_APT_DEPLOY_KEY`, test the connection, and then remove the old public key. If that secret is lost, generate a replacement SSH key; do not replace the archive signing key. The receiver and signing state remain covered by the previously verified system-backup paths.
+
+## Publish an update manually
 
 Build and test the app as described in the README. Transfer the tested package and the current publisher to the server, then run the publisher there:
 

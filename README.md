@@ -79,7 +79,7 @@ ctest --test-dir build --output-on-failure
 (cd build && cpack -G DEB)
 ```
 
-The `.deb` is written to `build/`. Archive operators can publish tested packages using [the signed APT repository maintenance instructions](docs/apt-repository.md). GitHub Actions also builds and attaches a package artifact for pushes and pull requests. Release commits on `main` whose message starts with `Release v` publish a preview release after the build and tests pass, using matching notes in `docs/releases/vVERSION.md`.
+The `.deb` is written to `build/`. Archive operators can publish tested packages using [the signed APT repository maintenance instructions](docs/apt-repository.md). GitHub Actions also builds and attaches a package artifact for pushes and pull requests. Release commits on `main` whose message starts with `Release v` publish a preview release after the build and tests pass, using matching notes in `docs/releases/vVERSION.md`. The tested release package is then published automatically to the signed APT repository. Manually published GitHub releases also deploy when they contain the matching `.deb` and `SHA256SUMS`; drafts do not deploy.
 
 To try the interface before installing (synthetic data; no root required):
 
