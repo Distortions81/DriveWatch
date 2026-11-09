@@ -25,7 +25,34 @@ Screenshots show synthetic data using a consistent dark theme. Fonts and colors 
 - Login autostart enabled after installation, with a per-user toggle in Settings.
 - No database, web server, Python packages, or KDE Frameworks dependencies.
 
-## Install the Debian package
+## Install from the signed APT repository
+
+The repository currently provides **amd64 packages built and tested on Ubuntu 24.04**. Other distributions are not yet tested.
+
+Add the M45 Software public signing key and repository source using the setup package:
+
+```sh
+sudo apt install curl ca-certificates
+curl -fLO https://m45software.com/apt/m45-software-archive-keyring_1.0_all.deb
+printf '%s  %s\n' '64c664ec99234f244ec051e945ff604d8390966ef0d47df28c3ee39edc3d0fd1' 'm45-software-archive-keyring_1.0_all.deb' | sha256sum -c -
+sudo apt install ./m45-software-archive-keyring_1.0_all.deb
+sudo apt update
+sudo apt install m45-drive-watcher
+m45-drive-watcher --show
+```
+
+The setup package installs `/usr/share/keyrings/m45-software-archive-keyring.asc` and `/etc/apt/sources.list.d/m45-software.sources`. The source uses `Signed-By` to scope trust to this archive. Signing-key fingerprint: **`F8BD 2FC4 4347 3EB7 1D87 003B F8A7 E75C 58D7 C0A3`**.
+
+For later updates:
+
+```sh
+sudo apt update
+sudo apt install --only-upgrade m45-drive-watcher
+```
+
+Quit the running tray app and reopen it after upgrading. To remove the repository and its public key while keeping installed apps, run `sudo apt purge m45-software-archive-keyring`.
+
+### Install a local package instead
 
 Build a package as below, then install it on a machine running systemd and a desktop session:
 
@@ -52,7 +79,7 @@ ctest --test-dir build --output-on-failure
 (cd build && cpack -G DEB)
 ```
 
-The `.deb` is written to `build/`. GitHub Actions also builds and attaches a package artifact for pushes and pull requests. Release commits on `main` whose message starts with `Release v` publish a preview release after the build and tests pass, using matching notes in `docs/releases/vVERSION.md`.
+The `.deb` is written to `build/`. Archive operators can publish tested packages using [the signed APT repository maintenance instructions](docs/apt-repository.md). GitHub Actions also builds and attaches a package artifact for pushes and pull requests. Release commits on `main` whose message starts with `Release v` publish a preview release after the build and tests pass, using matching notes in `docs/releases/vVERSION.md`.
 
 To try the interface before installing (synthetic data; no root required):
 
@@ -65,7 +92,7 @@ The demo does not change real settings, baselines, autostart preferences, or sen
 
 ## How monitoring works
 
-`m45-drive-watcher-collector.timer` runs the root-owned, fixed-command collector once per minute. It discovers physical SATA/SAS/SCSI, NVMe namespaces, and MMC block devices from sysfs and runs `smartctl -x --json=o` with a 90-second timeout per drive. Devices explicitly reporting no SMART support show **No SMART support**, without repeated read-failure alerts. Failed queries show **SMART unavailable** and retain the 30-minute alert policy; a USB connection alone does not prove a drive lacks SMART. Neither state is a healthy-drive assessment. Failed queries retain the original SMART diagnostic output so USB command errors are visible. A bounded, read-only `lsblk` query supplies model/serial fallback, USB transport, capacity, filesystem labels and mount locations without mounting anything; sysfs supplies a further model/transport fallback. Device-mapper/RAID virtual volumes, loop devices, and partitions are excluded. Hardware behind RAID bridges may require extra smartctl support and is not automatically enumerated behind controllers.
+`m45-drive-watcher-collector.timer` runs the root-owned, fixed-command collector once per minute. It discovers physical SATA/SAS/SCSI, NVMe namespaces, and MMC block devices from sysfs and runs `smartctl -x --json=o` with a 90-second timeout per drive. Devices explicitly reporting no SMART support show **SMART unavailable**, without repeated read-failure alerts. Failed queries show **SMART unavailable** and retain the 30-minute alert policy; a USB connection alone does not prove a drive lacks SMART. Neither state is a healthy-drive assessment. Failed queries retain the original SMART diagnostic output so USB command errors are visible. A bounded, read-only `lsblk` query supplies model/serial fallback, USB transport, capacity, filesystem labels and mount locations without mounting anything; sysfs supplies a further model/transport fallback. Device-mapper/RAID virtual volumes, loop devices, and partitions are excluded. Hardware behind RAID bridges may require extra smartctl support and is not automatically enumerated behind controllers.
 
 The collector accepts no user commands or arguments and performs no repairs, formats, self-tests, firmware changes, or SMART enable/disable operations. It atomically writes `/run/m45-drive-watcher/snapshot.json`. This file is readable by local users and includes drive serial numbers, filesystem labels, and mount paths. The systemd service limits privileges and writes to its runtime directory; the desktop app never runs as root and does not launch privileged processes.
 
