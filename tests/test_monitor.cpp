@@ -18,6 +18,39 @@ QJsonObject frame(QJsonObject d = drive(), qint64 time = now) {
 class Tests : public QObject {
     Q_OBJECT
 private slots:
+    void firstCollectionGetsABoundedBootGracePeriod() {
+        Monitor m;
+        for (qint64 uptime : {0, 20, 40, 59}) {
+            QVERIFY(m.missingCollector(uptime, now + uptime).isEmpty());
+            QVERIFY(!m.warning());
+            QVERIFY(m.events().isEmpty());
+            QVERIFY(m.coverage().startsWith("Waiting for the first drive readings"));
+        }
+        QVERIFY(!m.missingCollector(60, now + 60).isEmpty());
+        QVERIFY(m.warning());
+        m.update(frame(drive(), now + 70), now + 70);
+        // A genuine timeout remains in alert history until acknowledged.
+        m.acknowledge();
+        QVERIFY(!m.warning());
+        QVERIFY(!m.coverage().startsWith("Waiting"));
+        Monitor quickStart;
+        quickStart.missingCollector(20, now + 20);
+        quickStart.update(frame(drive(), now + 30), now + 30);
+        QVERIFY(!quickStart.warning());
+        QVERIFY(quickStart.events().isEmpty());
+        Monitor unknownBoot;
+        QVERIFY(!unknownBoot.missingCollector(-1, now).isEmpty());
+        QVERIFY(unknownBoot.warning());
+    }
+    void bootGraceKeepsKnownDriveProblemsVisible() {
+        Monitor m;
+        m.update(frame(drive("1", 80)), now);
+        QVERIFY(m.warning());
+        const auto count = m.events().size();
+        QVERIFY(m.missingCollector(20, now + 20).isEmpty());
+        QVERIFY(m.warning());
+        QCOMPARE(m.events().size(), count);
+    }
     void uncheckedDrivePersistsAndStopsAllItsAlerts() {
         Monitor m;
         m.update(frame(drive("1", 80)), now);

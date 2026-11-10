@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.13
+
+- Wait a full minute after boot before warning about a missing collector snapshot.
+- Show a waiting status while the initial readings are pending, without hiding known drive problems.
+
 ## 0.1.12
 
 - Default login startup to the tray, with an optional Open window at login preference.

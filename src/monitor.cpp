@@ -85,6 +85,17 @@ void Monitor::active(QJsonObject &record, const QJsonObject &conditions, qint64 
     record["active"] = conditions;
 }
 
+QStringList Monitor::missingCollector(qint64 uptime, qint64 now, const Policy &policy) {
+    // The timer starts 20 seconds after boot. Give the first readings a full
+    // minute from boot before reporting a missing snapshot.
+    if (uptime >= 0 && uptime < 60) {
+        m_state["global"] = QJsonObject();
+        m_state["coverage"] = "Waiting for the first drive readings after startup.";
+        return {};
+    }
+    return unavailable("Collector unavailable. Check m45-drive-watcher-collector.timer and service.", now, policy);
+}
+
 QStringList Monitor::unavailable(const QString &reason, qint64 now, const Policy &policy) {
     QStringList notices;
     const auto records = m_state.value("drives").toObject();

@@ -504,8 +504,18 @@ void Window::poll() {
     }
     else {
         QFile f("/run/m45-drive-watcher/snapshot.json");
-        if (!f.open(QIODevice::ReadOnly))
-            notifications = m_monitor.unavailable("Collector unavailable. Check m45-drive-watcher-collector.timer and service.", now, policy());
+        if (!f.open(QIODevice::ReadOnly)) {
+            if (!f.exists()) {
+                QFile bootClock("/proc/uptime");
+                bool valid = false;
+                double uptime = -1;
+                if (bootClock.open(QIODevice::ReadOnly))
+                    uptime = bootClock.readAll().split(' ').value(0).toDouble(&valid);
+                notifications = m_monitor.missingCollector(valid ? qint64(uptime) : -1, now, policy());
+            } else {
+                notifications = m_monitor.unavailable("Collector readings could not be opened: " + f.errorString(), now, policy());
+            }
+        }
         else {
             QJsonParseError error;
             auto doc = QJsonDocument::fromJson(f.readAll(), &error);
@@ -540,7 +550,8 @@ void Window::save() {
 
 void Window::render() {
     const bool warn = m_monitor.warning() || m_saveFailed;
-    const QString quietStatus = m_monitor.coverage() == "No drives selected for monitoring." ? "Monitoring paused"
+    const QString quietStatus = m_monitor.coverage().startsWith("Waiting for the first drive readings") ? "Waiting for first drive readings"
+        : m_monitor.coverage() == "No drives selected for monitoring." ? "Monitoring paused"
         : m_monitor.coverage().contains("unsupported") ? "Some health readings are unavailable" : "No new health concerns";
     m_status->setText(warn ? (m_monitor.unreadCount() > 0
         ? QString("Attention needed · %1 unread alerts").arg(m_monitor.unreadCount()) : "Attention needed") : quietStatus);

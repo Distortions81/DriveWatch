@@ -20,6 +20,7 @@ public:
     explicit Monitor(QJsonObject saved = {});
     QStringList update(const QJsonObject &snapshot, qint64 now, const Policy &policy = {});
     QStringList unavailable(const QString &reason, qint64 now, const Policy &policy = {});
+    QStringList missingCollector(qint64 uptime, qint64 now, const Policy &policy = {});
     void acknowledge();
     void setMonitored(const QString &id, bool enabled);
     void forgetDisconnected();
