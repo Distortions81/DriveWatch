@@ -15,7 +15,8 @@ runs:
         echo "image=${ImageVersion:-ubuntu-24.04}" >> "$GITHUB_OUTPUT"
         mkdir -p "$RUNNER_TEMP/m45-apt-archives"
     - name: Restore downloaded APT packages
-      uses: actions/cache@v4
+      id: archives
+      uses: actions/cache/restore@v4
       with:
         # Exclude APT's root-owned locks and private partial-download directory.
         path: ${{ runner.temp }}/m45-apt-archives/*.deb
@@ -29,3 +30,9 @@ runs:
       env:
         PACKAGES_FILE: ${{ inputs.packages-file }}
       run: bash "$GITHUB_ACTION_PATH/install.sh" "$PACKAGES_FILE"
+    - name: Save downloaded APT packages
+      if: steps.archives.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/m45-apt-archives/*.deb
+        key: ${{ steps.archives.outputs.cache-primary-key }}
