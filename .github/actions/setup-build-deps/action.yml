@@ -1,0 +1,31 @@
+name: Cached Ubuntu build dependencies
+description: Reuse downloaded APT archives while installing dependencies normally.
+inputs:
+  packages-file:
+    description: File containing one required Ubuntu package name per line.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Identify dependency cache
+      id: key
+      shell: bash
+      run: |
+        echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+        echo "image=${ImageVersion:-ubuntu-24.04}" >> "$GITHUB_OUTPUT"
+        mkdir -p "$RUNNER_TEMP/m45-apt-archives"
+    - name: Restore downloaded APT packages
+      uses: actions/cache@v4
+      with:
+        # Exclude APT's root-owned locks and private partial-download directory.
+        path: ${{ runner.temp }}/m45-apt-archives/*.deb
+        key: m45-apt-v1-ubuntu24.04-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(inputs.packages-file) }}-${{ steps.key.outputs.image }}-${{ steps.key.outputs.day }}
+        restore-keys: |
+          m45-apt-v1-ubuntu24.04-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(inputs.packages-file) }}-${{ steps.key.outputs.image }}-
+          m45-apt-v1-ubuntu24.04-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(inputs.packages-file) }}-
+          m45-apt-v1-ubuntu24.04-${{ runner.os }}-${{ runner.arch }}-
+    - name: Install required packages from the archive cache
+      shell: bash
+      env:
+        PACKAGES_FILE: ${{ inputs.packages-file }}
+      run: bash "$GITHUB_ACTION_PATH/install.sh" "$PACKAGES_FILE"

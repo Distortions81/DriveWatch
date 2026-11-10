@@ -1,0 +1,10 @@
+cmake
+ninja-build
+g++
+qt6-base-dev
+qt6-qpa-plugins
+python3
+smartmontools
+dpkg-dev
+gnupg
+ccache

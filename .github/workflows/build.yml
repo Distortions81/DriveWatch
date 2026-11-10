@@ -8,14 +8,35 @@ permissions:
 jobs:
   deb:
     runs-on: ubuntu-24.04
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 250M
     steps:
       - uses: actions/checkout@v4
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build g++ qt6-base-dev python3 dpkg-dev smartmontools gnupg
+        uses: ./.github/actions/setup-build-deps
+        with:
+          packages-file: .github/ci/apt-packages.txt
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-v1-${{ runner.os }}-${{ runner.arch }}-ubuntu24.04-${{ hashFiles('CMakeLists.txt', 'cmake/**', '.github/workflows/build.yml') }}-${{ github.sha }}
+          restore-keys: |
+            ccache-v1-${{ runner.os }}-${{ runner.arch }}-ubuntu24.04-${{ hashFiles('CMakeLists.txt', 'cmake/**', '.github/workflows/build.yml') }}-
+            ccache-v1-${{ runner.os }}-${{ runner.arch }}-ubuntu24.04-
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
-        run: cmake --build build --parallel 2
+        run: |
+          ccache --zero-stats
+          cmake --build build --parallel 2
+      - name: Compiler cache statistics
+        if: always()
+        run: |
+          if command -v ccache >/dev/null 2>&1; then ccache --show-stats; fi
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: Package

@@ -81,6 +81,14 @@ ctest --test-dir build --output-on-failure
 
 The `.deb` is written to `build/`. Archive operators can publish tested packages using [the signed APT repository maintenance instructions](docs/apt-repository.md). GitHub Actions also builds and attaches a package artifact for pushes and pull requests. Release commits on `main` whose message starts with `Release v` publish a preview release after the build and tests pass, using matching notes in `docs/releases/vVERSION.md`. The tested release package is then published automatically to the signed APT repository. Manually published GitHub releases also deploy when they contain the matching `.deb` and `SHA256SUMS`; drafts do not deploy.
 
+CI caches the downloaded Ubuntu packages listed in `.github/ci/apt-packages.txt`
+and installs them without optional recommendations. APT still updates indexes,
+resolves dependencies, and verifies packages. Daily cache keys include the runner
+image, architecture, and dependency manifest; older matching caches seed new
+keys. The first run fills the cache. C++ compilation uses a separate 250 MB
+`ccache`, with hit/miss statistics in the build log. CMake configuration, tests,
+and Debian packaging run normally. APT publication needs no development tools.
+
 To try the interface before installing (synthetic data; no root required):
 
 ```sh
