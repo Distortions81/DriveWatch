@@ -347,6 +347,13 @@ Window::Window(bool demo, bool demoWarning, int initialTab)
     m_startup->setChecked(!entry.value("Hidden", false).toBool());
     m_startup->setEnabled(!demo);
     form->addRow(m_startup);
+    auto *loginWindow = new QCheckBox("Open window at login");
+    loginWindow->setObjectName("showWindowAtLogin");
+    loginWindow->setChecked(m_settings.value("showWindowAtLogin", false).toBool());
+    loginWindow->setEnabled(!demo && m_startup->isChecked());
+    form->addRow(loginWindow);
+    connect(m_startup, &QCheckBox::toggled, loginWindow, [this, loginWindow](bool on) { loginWindow->setEnabled(!m_demo && on); });
+    connect(loginWindow, &QCheckBox::toggled, this, [this](bool on) { if (!m_demo) m_settings.setValue("showWindowAtLogin", on); });
     m_notifications = new QCheckBox("Show desktop notifications");
     m_notifications->setChecked(demo || m_settings.value("notifications", true).toBool());
     form->addRow(m_notifications);
@@ -774,7 +781,7 @@ bool Window::setAutostart(bool enabled) {
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
     QSaveFile f(path);
     if (!f.open(QIODevice::WriteOnly)) return false;
-    QByteArray contents = "[Desktop Entry]\nType=Application\nName=M45 Drive Watcher\nExec=m45-drive-watcher\nIcon=m45-drive-watcher\nTerminal=false\nHidden=";
+    QByteArray contents = "[Desktop Entry]\nType=Application\nName=M45 Drive Watcher\nExec=m45-drive-watcher --autostart\nIcon=m45-drive-watcher\nTerminal=false\nHidden=";
     contents += enabled ? "false\n" : "true\n";
     contents += "X-GNOME-Autostart-enabled=";
     contents += enabled ? "true\n" : "false\n";

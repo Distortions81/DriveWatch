@@ -2,7 +2,7 @@
 Type=Application
 Name=M45 Drive Watcher
 Comment=Monitor drive health and temperature in the system tray
-Exec=m45-drive-watcher
+Exec=m45-drive-watcher --show
 Icon=m45-drive-watcher
 Terminal=false
 Categories=System;Monitor;

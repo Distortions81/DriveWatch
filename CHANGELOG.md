@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.12
+
+- Default login startup to the tray, with an optional Open window at login preference.
+- Keep repeated login launches quiet and open the overview from the Applications menu.
+
 ## 0.1.11
 
 - Show interface type and negotiated connection speed in Summary.

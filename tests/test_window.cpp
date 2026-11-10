@@ -18,6 +18,25 @@
 class WindowTests : public QObject {
     Q_OBJECT
 private slots:
+    void loginWindowPreferenceDefaultsToTrayAndPersists() {
+        QSettings settings("M45Software", "m45-drive-watcher");
+        settings.remove("showWindowAtLogin"); settings.sync();
+        {
+            Window window(false);
+            auto *checkbox = window.findChild<QCheckBox *>("showWindowAtLogin");
+            QVERIFY(checkbox); QVERIFY(!checkbox->isChecked());
+            checkbox->setChecked(true);
+            QCOMPARE(settings.value("showWindowAtLogin").toBool(), true);
+        }
+        {
+            Window window(false);
+            auto *checkbox = window.findChild<QCheckBox *>("showWindowAtLogin");
+            QVERIFY(checkbox->isChecked());
+            checkbox->setChecked(false);
+        }
+        QCOMPARE(settings.value("showWindowAtLogin").toBool(), false);
+    }
+
     void previewShowsDualUnitsAndNoWrites() {
         Window window(true);
         window.poll();

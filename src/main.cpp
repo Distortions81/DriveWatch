@@ -5,6 +5,7 @@
 #include <QDBusInterface>
 #include <QDir>
 #include <QFileInfo>
+#include <QSettings>
 #include <QTimer>
 #include <QPalette>
 
@@ -21,6 +22,7 @@ int main(int argc, char **argv) {
     args.setApplicationDescription("Drive health monitoring for your system tray");
     args.addHelpOption();
     args.addVersionOption();
+    args.addOption({"autostart", "Start at login; stay in the tray unless Open window at login is enabled."});
     args.addOption({"show", "Open the drive overview on launch."});
     args.addOption({"demo", "Preview with synthetic data; never change real monitoring state or settings."});
     args.addOption({"demo-warning", "Show synthetic warning conditions (requires --demo)."});
@@ -31,12 +33,14 @@ int main(int argc, char **argv) {
     if ((args.isSet("screenshot") || args.isSet("demo-warning")) && !demo) args.showHelp(2);
     const int page = QStringList{"drives", "history", "settings", "tray", "technical"}.indexOf(args.value("page"));
     if (page < 0) args.showHelp(2);
+    const bool loginWindow = args.isSet("autostart") && QSettings("M45Software", "m45-drive-watcher").value("showWindowAtLogin", false).toBool();
+    const bool quietLogin = args.isSet("autostart") && !loginWindow && !args.isSet("show");
     auto bus = QDBusConnection::sessionBus();
     if (!demo) {
         if (!bus.isConnected()) qFatal("A desktop D-Bus session is required.");
         if (!bus.registerService("com.m45software.DriveWatcher")) {
             QDBusInterface existing("com.m45software.DriveWatcher", "/M45DriveWatcher", "com.m45software.DriveWatcher", bus);
-            existing.call("Show");
+            if (!quietLogin) existing.call("Show");
             return 0;
         }
     }
@@ -63,8 +67,8 @@ int main(int argc, char **argv) {
     }
     Window window(demo, args.isSet("demo-warning"), page);
     if (!demo) bus.registerObject("/M45DriveWatcher", &window, QDBusConnection::ExportAllSlots);
-    if (page == 3) QTimer::singleShot(100, &window, &Window::showTrayPopup);
-    else if (demo || args.isSet("show")) window.Show();
+    if (!quietLogin && page == 3) QTimer::singleShot(100, &window, &Window::showTrayPopup);
+    else if (!quietLogin && (loginWindow || demo || args.isSet("show"))) window.Show();
     if (args.isSet("screenshot")) {
         QTimer::singleShot(600, &app, [&] {
             const QString path = QFileInfo(args.value("screenshot")).absoluteFilePath();

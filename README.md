@@ -180,3 +180,5 @@ Removal stops and disables the collector. Quit the existing tray process yoursel
 - [smartmontools NVMe JSON output](https://github.com/smartmontools/smartmontools/blob/main/src/nvmeprint.cpp)
 
 MIT licensed. M45 Drive Watcher is not affiliated with KDE or a drive manufacturer.
+
+Login startup uses `--autostart` and stays in the tray by default. Enable **Open window at login** in Settings to show the window automatically. Applications-menu launches open the window; a repeated login launch does not raise an existing window unless requested.
