@@ -16,7 +16,7 @@ runs:
         mkdir -p "$RUNNER_TEMP/m45-apt-archives"
     - name: Restore downloaded APT packages
       id: archives
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         # Exclude APT's root-owned locks and private partial-download directory.
         path: ${{ runner.temp }}/m45-apt-archives/*.deb
@@ -32,7 +32,7 @@ runs:
       run: bash "$GITHUB_ACTION_PATH/install.sh" "$PACKAGES_FILE"
     - name: Save downloaded APT packages
       if: steps.archives.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/m45-apt-archives/*.deb
         key: ${{ steps.archives.outputs.cache-primary-key }}
